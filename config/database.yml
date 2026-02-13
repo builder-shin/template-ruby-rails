@@ -19,10 +19,10 @@ test:
   <<: *default
   username: <%= ENV.fetch("TEST_DATABASE_USERNAME", "") %>
   password: <%= ENV.fetch("TEST_DATABASE_PASSWORD", "") %>
-  database: <%= ENV.fetch("TEST_DATABASE_NAME", "flexwork-test") %>
+  database: <%= ENV.fetch("TEST_DATABASE_NAME", "template_test") %>
 
 production:
   <<: *default
   username: <%= ENV.fetch("PRD_DATABASE_USERNAME", "") %>
   password: <%= ENV.fetch("PRD_DATABASE_PASSWORD", "") %>
-  database: <%= ENV.fetch("PRD_DATABASE_NAME", "flexwork-prd") %>
+  database: <%= ENV.fetch("PRD_DATABASE_NAME", "template_production") %>

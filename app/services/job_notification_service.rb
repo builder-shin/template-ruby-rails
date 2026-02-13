@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class JobNotificationService
-  FRONTEND_URL = ENV.fetch("FRONTEND_URL", "https://flexwork.kr")
+  FRONTEND_URL = ENV.fetch("FRONTEND_URL", "http://localhost:3000")
 
   def initialize
     @notification = NotificationService.new
