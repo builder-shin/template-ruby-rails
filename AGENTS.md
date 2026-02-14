@@ -23,7 +23,6 @@ Rails 8.1 기반 JSON:API 백엔드 템플릿 프로젝트. 채용 플랫폼(구
 | `db/` | 데이터베이스 스키마, 마이그레이션, 시드 (see `db/AGENTS.md`) |
 | `spec/` | RSpec 테스트 (see `spec/AGENTS.md`) |
 | `lib/` | 라이브러리 및 Rake 태스크 (see `lib/AGENTS.md`) |
-| `docs/` | 프로젝트 문서 (see `docs/AGENTS.md`) |
 
 ## For AI Agents
 
