@@ -236,6 +236,39 @@ module CrudActions
     head :no_content
   end
 
+  def upsert_find_params; end
+  def upsert_after_init; end
+  def upsert_after_assign; end
+  def upsert_after_save(success, created); end
+
+  def upsert
+    find_params = upsert_find_params
+    if find_params.blank?
+      raise JsonApiError.new("BadRequest", "upsert_find_params를 컨트롤러에서 정의해야 합니다.", 400)
+    end
+
+    @model = klass.find_or_initialize_by(find_params)
+    created = @model.new_record?
+    upsert_after_init
+    return if performed?
+
+    @model.assign_attributes(model_params)
+    upsert_after_assign
+    return if performed?
+
+    unless @model.save
+      upsert_after_save(false, created)
+      return if performed?
+
+      return render jsonapi_errors: @model.errors, status: :unprocessable_entity
+    end
+
+    upsert_after_save(true, created)
+    return if performed?
+
+    render jsonapi: @model, status: created ? :created : :ok
+  end
+
   def model_params_options
     {}
   end
