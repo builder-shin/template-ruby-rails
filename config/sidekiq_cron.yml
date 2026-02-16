@@ -1,29 +1,8 @@
-activate_scheduled_job_posts:
-  cron: "*/30 * * * * Asia/Seoul"
-  class: "ActivateScheduledJobPostsJob"
-  queue: "default"
-  description: "예약 게시된 공고 활성화 (30분마다)"
-
-close_expired_job_posts:
-  cron: "0 0 * * * Asia/Seoul"
-  class: "CloseExpiredJobPostsJob"
-  queue: "default"
-  description: "마감일 도래 공고 자동 마감 (매일 자정 KST)"
-
-send_job_recommendations:
-  cron: "30 7 * * * Asia/Seoul"
-  class: "SendJobRecommendationsJob"
-  queue: "mailers"
-  description: "채용공고 추천 이메일 발송 (매일 07:30 KST)"
-
-process_event_notifications:
-  cron: "0 * * * * Asia/Seoul"
-  class: "ProcessEventNotificationsJob"
-  queue: "mailers"
-  description: "이벤트 리마인더 발송 (매시 정각 KST)"
-
-cleanup_incomplete_profiles:
-  cron: "0 3 * * * Asia/Seoul"
-  class: "CleanupIncompleteProfilesJob"
-  queue: "default"
-  description: "미완성 고아 프로필 정리 (매일 03:00 KST)"
+# Sidekiq Cron Jobs
+# Add your scheduled jobs here.
+# Example:
+# my_job:
+#   cron: "0 * * * * Asia/Seoul"
+#   class: "MyJob"
+#   queue: "default"
+#   description: "My scheduled job"

@@ -6,11 +6,6 @@ class Rack::Attack
     req.ip
   end
 
-  # Throttle POST requests to /api/v1/recruitment_requests (unauthenticated create)
-  throttle("recruitment_requests/ip", limit: 5, period: 1.minute) do |req|
-    req.ip if req.path.start_with?("/api/v1/recruitment_requests") && req.post?
-  end
-
   # Throttle login attempts (auth callback)
   throttle("auth/ip", limit: 10, period: 1.minute) do |req|
     req.ip if req.path.start_with?("/auth")
