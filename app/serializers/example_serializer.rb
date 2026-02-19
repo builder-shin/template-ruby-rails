@@ -151,6 +151,8 @@ class ExampleSerializer < ApplicationSerializer
     }
 
     # 조건부 메타데이터 추가
+    # NOTE: 컬렉션 렌더링 시 N+1 쿼리가 발생할 수 있습니다.
+    # counter_cache 또는 includes를 사용하여 최적화하세요.
     if params[:include_stats]
       data[:statistics] = {
         total_views: object.view_count,

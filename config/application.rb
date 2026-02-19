@@ -1,5 +1,7 @@
 require_relative "boot"
 
+# NOTE: API-only 앱에서는 필요한 프레임워크만 로드하여 메모리/부팅 시간을 최적화할 수 있습니다.
+# 예: require "active_record/railtie", require "action_controller/railtie" 등
 require "rails/all"
 
 # Require the gems listed in Gemfile, including any gems

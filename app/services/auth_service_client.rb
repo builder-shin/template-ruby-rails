@@ -9,6 +9,9 @@ class AuthServiceClient
   FAILURE_THRESHOLD = 5
   RESET_TIMEOUT = 30 # seconds
 
+  # NOTE: Circuit state는 프로세스 메모리에 저장됩니다.
+  # Puma multi-worker 환경에서는 각 worker가 독립적인 circuit state를 가집니다.
+  # 정확한 circuit breaking이 필요하면 Redis 기반 구현을 고려하세요.
   class << self
     def circuit_state
       @circuit_state ||= { state: :closed, failure_count: 0, last_failure_at: nil }
