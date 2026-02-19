@@ -35,7 +35,7 @@ class SendgridEmailService
     end
   rescue => e
     Rails.logger.error "[SendGrid] Exception sending email: #{e.message}"
-    raise
+    { success: false, error: e.message }
   end
 
   # 배치 템플릿 이메일 발송 (최대 1000건/배치)
