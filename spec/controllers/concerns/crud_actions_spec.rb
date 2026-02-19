@@ -333,7 +333,7 @@ RSpec.describe 'CrudActions', type: :request do
 
     it 'defaults status to 500' do
       error = CrudActions::JsonApiError.new('Error', 'Something went wrong')
-      expect(error.status).to eq('500')
+      expect(error.status).to eq(500)
     end
 
     it 'inherits from StandardError' do

@@ -55,6 +55,7 @@ RSpec.configure do |config|
   end
 
   config.after do |example|
+    next unless example.metadata[:response].present?
     example.metadata[:response][:code] += "{division}#{example.metadata[:full_description]}"
     content = example.metadata[:response][:content] || {}
     example_spec = {
