@@ -74,35 +74,3 @@ RSpec.configure do |config|
     expect(JSON.parse(response.body)['errors'][0]['title']).to eq(error)
   end
 end
-
-private
-
-def generate_response_schema(example, response)
-  return if example.metadata[:response].blank?
-
-  content = example.metadata[:response][:content] || {}
-  parsed_body = parse_response_body(response)
-  example_spec = create_example_spec(example, parsed_body)
-
-  example.metadata[:response][:content] = content.deep_merge(example_spec)
-end
-
-def parse_response_body(response)
-  return nil if response.blank?
-
-  JSON.parse(response.body, symbolize_names: true)
-rescue JSON::ParserError
-  nil
-end
-
-def create_example_spec(example, parsed_body)
-  {
-    'application/json' => {
-      examples: {
-        example.metadata => {
-          value: parsed_body
-        }
-      }
-    }
-  }
-end

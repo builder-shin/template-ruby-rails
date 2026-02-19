@@ -36,6 +36,17 @@ group :development, :test do
 
   # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
   gem "rubocop-rails-omakase", require: false
+
+  # 테스트를 위한 Gem
+  gem "rspec-rails"
+  # 테스트 데이터를 만들기 위한 Gem
+  gem "factory_bot_rails"
+  # 무작위 데이터를 만들기 위한 Gem
+  gem "faker"
+  # 데이터베이스를 초기화하기 위한 Gem
+  gem "database_cleaner-active_record"
+  # 모델 테스트를 더 간결하게 작성하기 위한 Gem
+  gem "shoulda-matchers"
 end
 
 
@@ -77,20 +88,6 @@ gem "rails-i18n"
 gem "ostruct"
 #  로그 포맷 통일을 위한 Gem
 gem 'lograge'
-
-# 개발 / 테스트 환경 Gem
-group :development, :test do
-  # 테스트를 위한 Gem
-  gem "rspec-rails"
-  # 테스트 데이터를 만들기 위한 Gem
-  gem "factory_bot_rails"
-  # 무작위 데이터를 만들기 위한 Gem
-  gem "faker"
-  # 데이터베이스를 초기화하기 위한 Gem
-  gem "database_cleaner-active_record"
-  # 모델 테스트를 더 간결하게 작성하기 위한 Gem
-  gem "shoulda-matchers"
-end
 
 # 개발 환경 Gem
 group :development do
