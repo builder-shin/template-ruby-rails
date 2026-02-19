@@ -23,10 +23,7 @@ RUN bundle install --jobs 4 --retry 3
 
 COPY . .
 
-ENV RAILS_ENV=production \
-    SECRET_KEY_BASE=dummy_for_asset_precompilation
-
-RUN bundle exec rails assets:precompile || true
+ENV RAILS_ENV=production
 
 # Stage 2: Runtime - lean production image
 FROM ruby:3.4.8-slim
@@ -58,6 +55,6 @@ EXPOSE 4000
 USER app
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:${PORT}/health || exit 1
+  CMD curl -f http://localhost:${PORT}/health/live || exit 1
 
 CMD ["sh", "-c", "bundle exec rails db:migrate && bundle exec puma -C config/puma.rb"]

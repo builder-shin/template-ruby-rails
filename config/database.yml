@@ -1,7 +1,7 @@
 default: &default
   adapter: postgresql
   host: <%= ENV.fetch("DATABASE_HOST") %>
-  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 16 } %>
   timeout: 5000
   port: <%= ENV.fetch("DATABASE_PORT", 5432) %>
   encoding: unicode
