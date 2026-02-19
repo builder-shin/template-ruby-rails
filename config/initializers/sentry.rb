@@ -11,9 +11,14 @@ Sentry.init do |config|
   # Skip sending in development/test
   config.enabled_environments = %w[production staging]
 
-  # Filter sensitive parameters
+  # 민감한 필드만 선택적으로 필터링 (send_default_pii = false 와 함께 사용)
+  sensitive_fields = %w[password token secret api_key credit_card ssn]
   config.before_send = lambda do |event, _hint|
-    event.request.data = "[FILTERED]" if event.request&.data
+    if event.request&.data.is_a?(Hash)
+      event.request.data = event.request.data.each_with_object({}) do |(k, v), h|
+        h[k] = sensitive_fields.any? { |sf| k.to_s.downcase.include?(sf) } ? "[FILTERED]" : v
+      end
+    end
     event
   end
 end

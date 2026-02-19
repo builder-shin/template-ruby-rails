@@ -9,5 +9,7 @@ if Rails.env.production?
 end
 
 if Rails.env.development?
+  # 개발 환경에서는 디버깅을 위해 파라미터 필터링을 비활성화합니다.
+  # 주의: 개발 로그에 민감 정보가 평문으로 기록될 수 있습니다.
   Rails.application.config.filter_parameters = []
 end
