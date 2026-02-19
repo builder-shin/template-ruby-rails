@@ -9,6 +9,9 @@ class ApiController < ApplicationController
     Current.user
   end
 
+  # current_user alias (for compatibility with standard Rails patterns)
+  alias_method :current_user, :user_info
+
   def user_check!
     raise JsonApiError.new("Unauthorized", "로그인 후 이용해주세요.", 401) if user_info.nil?
   end
@@ -26,7 +29,7 @@ class ApiController < ApplicationController
   private
 
   def set_current_user
-    token = extract_bearer_token
+    token = extract_session_token
     return unless token
 
     Current.user = auth_service.verify_session(token)
@@ -36,7 +39,7 @@ class ApiController < ApplicationController
     raise JsonApiError.new("ServiceUnavailable", e.message, 503)
   end
 
-  def extract_bearer_token
+  def extract_session_token
     request.cookies['session_web']
   end
 
