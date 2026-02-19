@@ -5,7 +5,7 @@ module CrudActions
   class JsonApiError < StandardError
     attr_reader :status, :title
 
-    def initialize(title, msg, status = "500")
+    def initialize(title, msg, status = 500)
       @title = title
       @status = status
       super(msg)
@@ -132,15 +132,7 @@ module CrudActions
     end
 
     # Convert nested hash to ActiveRecord format
-    def convert_nested(hash)
-      hash.map do |key, value|
-        next key if value.nil? || value.empty?
-
-        { key => convert_nested(value) }
-      end
-    end
-
-    result + convert_nested(nested)
+    result + convert_nested_includes(nested)
   end
 
   def jsonapi_meta(resources)
@@ -154,10 +146,8 @@ module CrudActions
     show_after_init
     return if performed?
 
-    ActiveRecord::Base.transaction do
-      include_symbols = jsonapi_include.map(&:to_sym)
-      render jsonapi: @model, include: include_symbols
-    end
+    include_symbols = jsonapi_include.map(&:to_sym)
+    render jsonapi: @model, include: include_symbols
   end
 
   def new_after_init; end
@@ -283,10 +273,17 @@ module CrudActions
     @model = scope.find_by(id: params[:id])
     return unless @model.nil?
 
-    raise NotFound.new("You cannot found the resource with given id", "404")
+    raise NotFound.new("Not Found", "해당 ID의 리소스를 찾을 수 없습니다.", 404)
   end
 
   private
+
+  def convert_nested_includes(hash)
+    hash.map do |key, value|
+      next key if value.nil? || value.empty?
+      { key => convert_nested_includes(value) }
+    end
+  end
 
   def model_params
     jsonapi_deserialize(params, model_params_options)
