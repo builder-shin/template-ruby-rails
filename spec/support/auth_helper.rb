@@ -29,8 +29,8 @@ module AuthHelper
       .and_raise(AuthServiceClient::ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다.")
   end
 
-  def auth_headers(token = "valid_token")
-    { "Authorization" => "Bearer #{token}" }
+  def auth_cookies(token = "valid_token")
+    { "session_web" => token }
   end
 end
 
