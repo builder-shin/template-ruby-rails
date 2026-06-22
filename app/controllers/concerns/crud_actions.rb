@@ -23,15 +23,15 @@ module CrudActions
 
     # Override JSONAPI::Fetching#jsonapi_include to add filtering
     define_method(:jsonapi_include) do
-      return [] unless allowed_includes.present?
+      return @_jsonapi_include if defined?(@_jsonapi_include)
+      return @_jsonapi_include = [] unless allowed_includes.present?
 
-      requested = params['include'].to_s.split(',').filter_map(&:strip)
+      requested = params["include"].to_s.split(",").filter_map(&:strip)
       allowed = allowed_includes.map(&:to_s)
 
       # 중첩 경로(user.consents)는 top-level(user)이 허용 목록에 있으면 통과
-      requested.select do |path|
-        top_level = path.split(".").first
-        allowed.include?(top_level)
+      @_jsonapi_include = requested.select do |path|
+        allowed.include?(path.split(".").first)
       end
     end
 
@@ -51,49 +51,46 @@ module CrudActions
   end
 
   def klass
-    controller_name.classify.constantize
+    @_klass ||= controller_name.classify.constantize
   end
 
   def index
     scope = respond_to?(:index_scope, true) ? index_scope : klass.all
     scope = scope.includes(includes_for_active_record) if jsonapi_include.present?
-    paginated = jsonapi_paginate(scope)
 
     # Enum 필터 값을 integer로 변환
     transform_enum_filters!
 
-    filtered = jsonapi_filter(paginated, filter_attributes)
-
-    # Convert include paths to symbols for jsonapi-serializer
-    include_symbols = jsonapi_include.map(&:to_sym)
+    # 필터·정렬을 먼저 적용한 뒤 페이지네이션 (total-count/페이지 링크가 필터된 집합 기준)
+    filtered = jsonapi_filter(scope, filter_attributes)
+    paginated = jsonapi_paginate(filtered.result)
 
     # Explicitly pass include option to jsonapi-serializer
-    render jsonapi: filtered.result.load, include: include_symbols
+    render jsonapi: paginated.load, include: jsonapi_include.map(&:to_sym)
   end
 
   # Ransack enum 필터 문제 해결: 문자열 enum 값을 integer로 변환
   def transform_enum_filters!
     return unless params[:filter].present?
 
-    filter_params = params[:filter].to_unsafe_h
-    filter_params.each do |key, value|
+    enums = klass.defined_enums
+    return if enums.empty?
+
+    params[:filter].to_unsafe_h.each do |key, value|
       # _eq, _in 등 Ransack predicate 분리
-      attr_name = key.to_s.sub(/_(eq|not_eq|in|not_in|lt|lteq|gt|gteq|cont|matches)$/, '')
+      attr_name = key.to_s.sub(/_(eq|not_eq|in|not_in|lt|lteq|gt|gteq|cont|matches)$/, "")
 
-      # 해당 속성이 enum인지 확인
-      if klass.defined_enums.key?(attr_name)
-        enum_mapping = klass.defined_enums[attr_name]
+      enum_mapping = enums[attr_name]
+      next if enum_mapping.nil?
 
-        if value.is_a?(Array)
-          # _in 필터: 배열의 각 값을 integer로 변환
-          params[:filter][key] = value.map { |v| enum_mapping[v.to_s.downcase] || v }
-          next
-        end
-
-        # _eq 필터: 단일 값을 integer로 변환
-        converted = enum_mapping[value.to_s.downcase]
-        params[:filter][key] = converted if converted.present?
+      if value.is_a?(Array)
+        # _in 필터: 배열의 각 값을 integer로 변환
+        params[:filter][key] = value.map { |v| convert_enum_value(attr_name, enum_mapping, v) }
+        next
       end
+
+      # _eq 필터: 단일 값을 integer로 변환 (정수 0 포함)
+      params[:filter][key] = convert_enum_value(attr_name, enum_mapping, value)
     end
   end
 
@@ -109,7 +106,8 @@ module CrudActions
   # Convert JSON:API dot notation to ActiveRecord nested hash format
   # e.g., [:user, :"user.user_consents"] => [:user, { user: :user_consents }]
   def includes_for_active_record
-    return [] unless jsonapi_include.present?
+    return @_includes_for_active_record if defined?(@_includes_for_active_record)
+    return @_includes_for_active_record = [] unless jsonapi_include.present?
 
     result = []
     nested = {}
@@ -131,16 +129,7 @@ module CrudActions
       current[parts.last.to_sym] = nil  # Mark as leaf
     end
 
-    # Convert nested hash to ActiveRecord format
-    def convert_nested(hash)
-      hash.map do |key, value|
-        next key if value.nil? || value.empty?
-
-        { key => convert_nested(value) }
-      end
-    end
-
-    result + convert_nested(nested)
+    @_includes_for_active_record = result + convert_nested(nested)
   end
 
   def jsonapi_meta(resources)
@@ -246,7 +235,8 @@ module CrudActions
 
   def _set_model
     scope = klass
-    scope = scope.includes(includes_for_active_record) if jsonapi_include.present?
+    # destroy 는 관계를 직렬화하지 않으므로 eager load 생략 (낭비 쿼리 방지)
+    scope = scope.includes(includes_for_active_record) if jsonapi_include.present? && action_name != "destroy"
     @model = scope.find_by(id: params[:id])
     return unless @model.nil?
 
@@ -257,6 +247,26 @@ module CrudActions
 
   def model_params
     jsonapi_deserialize(params, model_params_options)
+  end
+
+  # Convert nested include hash to ActiveRecord format
+  # e.g. { user: { workspace: :members } }
+  def convert_nested(hash)
+    hash.map do |key, value|
+      next key if value.nil? || value.empty?
+
+      { key => convert_nested(value) }
+    end
+  end
+
+  # enum 라벨을 integer로 변환. 이미 숫자면 그대로 두고, 매핑 불가한 라벨은 400.
+  def convert_enum_value(attr_name, enum_mapping, value)
+    str = value.to_s.downcase
+    converted = enum_mapping[str]
+    return converted unless converted.nil?
+    return value if str.match?(/\A\d+\z/)
+
+    raise JsonApiError.new("잘못된 필터 값", "#{attr_name}의 유효하지 않은 값입니다: #{value}", "400")
   end
 
   class NotFound < JsonApiError; end
