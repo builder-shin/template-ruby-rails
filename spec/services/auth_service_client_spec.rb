@@ -6,6 +6,9 @@ RSpec.describe AuthServiceClient do
   let(:client) { described_class.new }
   let(:bearer_token) { "test_token_12345" }
 
+  # Circuit breaker 는 클래스 레벨 상태를 공유하므로 예제 간 격리를 위해 리셋
+  before { described_class.reset_circuit! }
+
   describe "#verify_session" do
     context "인증 성공 시" do
       let(:success_response) do
@@ -25,7 +28,7 @@ RSpec.describe AuthServiceClient do
 
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Authorization" => "Bearer #{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
           .to_return(
             status: 200,
             body: success_response.to_json,
@@ -66,7 +69,7 @@ RSpec.describe AuthServiceClient do
     context "인증 실패 시 (401)" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Authorization" => "Bearer #{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
           .to_return(status: 401, body: { error: "Unauthorized" }.to_json)
       end
 
@@ -79,7 +82,7 @@ RSpec.describe AuthServiceClient do
     context "서비스 오류 시 (500)" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Authorization" => "Bearer #{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
           .to_return(status: 500, body: { error: "Internal Server Error" }.to_json)
       end
 
@@ -92,7 +95,7 @@ RSpec.describe AuthServiceClient do
     context "타임아웃 시" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Authorization" => "Bearer #{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
           .to_timeout
       end
 
@@ -105,7 +108,7 @@ RSpec.describe AuthServiceClient do
     context "연결 실패 시" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Authorization" => "Bearer #{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
           .to_raise(Faraday::ConnectionFailed.new("Connection refused"))
       end
 
@@ -118,7 +121,7 @@ RSpec.describe AuthServiceClient do
     context "응답에 success가 false인 경우" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Authorization" => "Bearer #{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
           .to_return(
             status: 200,
             body: { "success" => false, "error" => "Invalid session" }.to_json,
