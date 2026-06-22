@@ -15,7 +15,8 @@ Rails.application.configure do
   config.lograge.custom_payload do |controller|
     {
       remote_ip: controller.request.remote_ip,
-      user_id: controller.try(:current_user)&.id,
+      user_id: Current.user&.id,
+      workspace_id: Current.user&.workspace_id,
       request_id: controller.request.request_id
     }
   end

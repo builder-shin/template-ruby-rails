@@ -1,17 +1,18 @@
 # frozen_string_literal: true
 
 class BlogAuthorPermission < ApplicationRecord
-  self.table_name = 'blog_author_permission'
+  self.table_name = "blog_author_permission"
 
+  # DB 컬럼이 string + CHECK 제약이므로 string-backed enum 으로 선언
   enum :status, {
-    pending: 0,
-    approved: 1,
-    rejected: 2
+    pending: "pending",
+    approved: "approved",
+    rejected: "rejected"
   }, prefix: true
 
   enum :author_type, {
-    personal: 0,
-    enterprise: 1
+    personal: "personal",
+    enterprise: "enterprise"
   }, prefix: true
 
   validates :author_id, presence: true

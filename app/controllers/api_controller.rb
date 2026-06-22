@@ -38,6 +38,9 @@ class ApiController < ApplicationController
     return unless token
 
     Current.user = auth_service.verify_session(token)
+    if defined?(Sentry) && Current.user
+      Sentry.set_user(id: Current.user.id, workspace_id: Current.user.workspace_id)
+    end
   rescue AuthServiceClient::AuthenticationError
     nil
   rescue AuthServiceClient::ServiceUnavailableError => e
@@ -45,7 +48,7 @@ class ApiController < ApplicationController
   end
 
   def extract_bearer_token
-    request.cookies['session_web']
+    request.cookies["session_web"]
   end
 
   def auth_service

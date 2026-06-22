@@ -50,6 +50,16 @@ RSpec.describe "Api::V1::CareerHubCommunities", type: :request do
         expect(body["meta"]["total-count"]).to eq(5)
       end
 
+      it "page[size] 가 MAX_PAGE_SIZE 를 넘으면 상한으로 클램프된다" do
+        # 상한(100)을 초과하는 레코드를 만들고 과대 page size 를 요청 → 한 페이지에 최대 100건
+        (CrudActions::MAX_PAGE_SIZE + 1).times { |i| CareerHubCommunity.create!(title: "bulk-#{i}") }
+
+        get base_path, params: { page: { size: 9999 } }
+
+        expect(response).to have_http_status(:ok)
+        expect(body["data"].size).to eq(CrudActions::MAX_PAGE_SIZE)
+      end
+
       it "이미 숫자인 값으로도 enum 필터링이 동작한다 (회귀 방지)" do
         get base_path, params: { filter: { status_eq: "1" } }
 

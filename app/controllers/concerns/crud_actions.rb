@@ -1,6 +1,9 @@
 module CrudActions
   extend ActiveSupport::Concern
 
+  # 페이지네이션 최대 크기. 클라이언트가 과도한 page[size] 로 풀스캔을 유발하는 것을 방지
+  MAX_PAGE_SIZE = 100
+
   # 임의의 Error 를 나타냅니다.
   class JsonApiError < StandardError
     attr_reader :status, :title
@@ -35,8 +38,14 @@ module CrudActions
       end
     end
 
+    # Override JSONAPI::Pagination#jsonapi_page_size to clamp the requested size
+    define_method(:jsonapi_page_size) do |pagination_params|
+      [ super(pagination_params), MAX_PAGE_SIZE ].min
+    end
+
     def render_jsonapi_internal_server_error(exception)
       unless exception.is_a?(JsonApiError)
+        Sentry.capture_exception(exception) if defined?(Sentry)
         Rails.logger.error exception.message
         Rails.logger.error exception.backtrace.join("\n")
         return super

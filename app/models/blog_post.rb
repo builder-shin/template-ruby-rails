@@ -1,18 +1,19 @@
 # frozen_string_literal: true
 
 class BlogPost < ApplicationRecord
-  self.table_name = 'blog_post'
+  self.table_name = "blog_post"
 
+  # DB 컬럼이 string + CHECK 제약이므로 string-backed enum 으로 선언
   enum :status, {
-    draft: 0,
-    published: 1,
-    hidden: 2,
-    deleted: 3
+    draft: "draft",
+    published: "published",
+    hidden: "hidden",
+    deleted: "deleted"
   }, prefix: true
 
   enum :author_type, {
-    personal: 0,
-    enterprise: 1
+    personal: "personal",
+    enterprise: "enterprise"
   }, prefix: true
 
   has_many :blog_post_categories, dependent: :destroy
