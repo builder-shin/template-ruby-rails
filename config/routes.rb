@@ -7,49 +7,16 @@ Rails.application.routes.draw do
 
   namespace :api do
     namespace :v1 do
-      # Reference data
-      resources :countries, only: [:index, :show]
-      resources :job_categories, only: [:index, :show]
-
-      # Career Hub
-      resources :career_hub_categories, only: [:index, :show]
-      resources :career_hub_communities
-      resources :career_hub_community_events
-      resources :career_hub_community_event_participants
-      resources :career_hub_community_feeds
-      resources :career_hub_community_feed_likes, only: [:index, :show, :create, :destroy]
-      resources :career_hub_community_leaders
-      resources :career_hub_community_members
-      resources :career_hub_event_reviews
-
-      # Job Posts
-      resources :job_posts
-      resources :job_post_categories
-      resources :job_post_jobs
-      resources :job_post_languages
-
-      # Jobs
-      resources :jobs, only: [:index, :show]
-      resources :job_applications
-
-      # Profiles
-      resources :profiles
-      resources :profile_attachments
-      resources :direct_uploads, only: [:create]
-      resources :profile_educations
-      resources :profile_experiences
-      resources :profile_freelance_experiences
-      resources :profile_highlights
-      resources :profile_languages
-      resources :profile_links
-      resources :profile_projects
-      resources :featured_profiles, only: [:index, :show]
-
-      # Blog
+      # Blog — example domain demonstrating CrudActions (filtering, pagination,
+      # JSON:API includes, enums). Replace with your own resources.
       resources :blog_posts
+      resources :blog_categories
+      resources :blog_post_categories, only: [:index, :show, :create, :destroy]
+      resources :blog_views, only: [:index, :show, :create]
+      resources :blog_author_permissions
 
-      # Recruitment
-      resources :recruitment_requests, only: [:create]
+      # Email templates — backs NotificationService (SendGrid template dispatch)
+      resources :email_templates
     end
   end
 end
