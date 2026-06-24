@@ -23,14 +23,6 @@ class ApiController < ApplicationController
     raise JsonApiError.new("Forbidden", "개인 회원만 이용 가능합니다.", 403) unless user_info.personal?
   end
 
-  def community_leader_check!(community_id)
-    user_check!
-    leader = CareerHubCommunityLeader.find_by(user_id: user_info.id, status: :approved)
-    return if leader && CareerHubCommunity.exists?(id: community_id, leader_id: leader.id)
-
-    raise JsonApiError.new("Forbidden", "커뮤니티 리더만 이용 가능합니다.", 403)
-  end
-
   private
 
   def set_current_user

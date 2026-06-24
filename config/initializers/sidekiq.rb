@@ -8,7 +8,7 @@ if defined?(Sidekiq)
     config.on(:startup) do
       schedule_file = Rails.root.join("config", "sidekiq_cron.yml")
       if File.exist?(schedule_file)
-        schedule = YAML.safe_load_file(schedule_file, permitted_classes: [Date, Time])
+        schedule = YAML.safe_load_file(schedule_file, permitted_classes: [ Date, Time ])
         Sidekiq::Cron::Job.load_from_hash!(schedule) if schedule.present?
       end
     end

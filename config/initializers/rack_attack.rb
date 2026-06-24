@@ -28,7 +28,7 @@ class Rack::Attack
     [
       429,
       { "Content-Type" => "application/vnd.api+json" },
-      [{ errors: [{ status: "429", title: "Too Many Requests", detail: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." }] }.to_json]
+      [ { errors: [ { status: "429", title: "Too Many Requests", detail: "요청이 너무 많습니다. 잠시 후 다시 시도해주세요." } ] }.to_json ]
     ]
   end
 end

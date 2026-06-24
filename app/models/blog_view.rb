@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class BlogView < ApplicationRecord
-  self.table_name = 'blog_view'
+  self.table_name = "blog_view"
 
   belongs_to :blog_post
 

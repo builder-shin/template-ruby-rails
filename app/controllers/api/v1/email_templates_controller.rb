@@ -6,7 +6,7 @@ module Api
       before_action :user_check!
 
       def filter_attributes
-        [:key, :name, :is_enabled]
+        [ :key, :name, :is_enabled ]
       end
 
       def model_params_options

@@ -4,10 +4,10 @@ module Api
   module V1
     class BlogAuthorPermissionsController < ApiController
       before_action :user_check!
-      before_action :verify_ownership!, only: [:update, :destroy]
+      before_action :verify_ownership!, only: [ :update, :destroy ]
 
       def filter_attributes
-        [:author_id, :author_type, :status]
+        [ :author_id, :author_type, :status ]
       end
 
       def model_params_options

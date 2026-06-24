@@ -15,7 +15,7 @@ class NotificationService
     dynamic_data = data.except(:recipient_email).transform_keys(&:to_s).transform_values { |v| v&.to_s || "" }
 
     # subject 변수 치환: {{variable}} → dynamic_data[variable]
-    subject = (template.subject || "[플렉스웍] 알림").gsub(/\{\{(\w+)\}\}/) do
+    subject = (template.subject || "알림").gsub(/\{\{(\w+)\}\}/) do
       dynamic_data[$1] || $&
     end
     dynamic_data["subject"] = subject

@@ -6,9 +6,9 @@ class ProcessImageVariantsJob < ApplicationJob
   IMAGE_CONTENT_TYPES = %w[image/jpeg image/png image/gif image/webp].freeze
 
   VARIANTS = {
-    thumbnail: { resize_to_fill: [80, 80] },
-    medium: { resize_to_fill: [200, 200] },
-    large: { resize_to_fill: [400, 400] }
+    thumbnail: { resize_to_fill: [ 80, 80 ] },
+    medium: { resize_to_fill: [ 200, 200 ] },
+    large: { resize_to_fill: [ 400, 400 ] }
   }.freeze
 
   def perform(blob_id)
