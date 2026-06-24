@@ -22,7 +22,7 @@ class EmailTemplate < ApplicationRecord
   # Validations
   validates :key, presence: true, uniqueness: true
   validates :name, presence: true
-  validates :is_enabled, inclusion: { in: [true, false] }
+  validates :is_enabled, inclusion: { in: [ true, false ] }
 
   # Scopes
   scope :enabled, -> { where(is_enabled: true) }

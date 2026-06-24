@@ -3,11 +3,11 @@
 module Api
   module V1
     class BlogPostsController < ApiController
-      before_action :user_check!, except: [:index, :show]
-      before_action :verify_ownership!, only: [:update, :destroy]
+      before_action :user_check!, except: [ :index, :show ]
+      before_action :verify_ownership!, only: [ :update, :destroy ]
 
       def filter_attributes
-        [:author_id, :author_type, :status, :slug, :publish_date]
+        [ :author_id, :author_type, :status, :slug, :publish_date ]
       end
 
       def model_params_options
@@ -21,7 +21,7 @@ module Api
       end
 
       def allowed_includes
-        [:blog_categories, :blog_views]
+        [ :blog_categories, :blog_views ]
       end
 
       private

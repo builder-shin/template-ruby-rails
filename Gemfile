@@ -96,7 +96,7 @@ gem "rails-i18n"
 # 환경 변수를 설정하기 위한 Gem
 gem "ostruct"
 #  로그 포맷 통일을 위한 Gem
-gem 'lograge'
+gem "lograge"
 
 # 개발 / 테스트 환경 Gem
 group :development, :test do

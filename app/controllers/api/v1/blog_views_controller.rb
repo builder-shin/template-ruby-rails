@@ -9,12 +9,12 @@ module Api
 
       def model_params_options
         {
-          only: [:blog_post_id]
+          only: [ :blog_post_id ]
         }
       end
 
       def allowed_includes
-        [:blog_post]
+        [ :blog_post ]
       end
 
       private

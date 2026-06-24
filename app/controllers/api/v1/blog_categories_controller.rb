@@ -6,11 +6,11 @@ module Api
       # Routes: only: [:index, :show] — read-only resource
 
       def filter_attributes
-        [:name, :slug, :level, :status, :parent_id]
+        [ :name, :slug, :level, :status, :parent_id ]
       end
 
       def allowed_includes
-        [:parent, :children, :blog_posts]
+        [ :parent, :children, :blog_posts ]
       end
     end
   end
