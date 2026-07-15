@@ -53,8 +53,19 @@ RSpec.describe "SimpleCov configuration" do
 
   def simplecov_call?(call, method_name)
     receiver = call[1] if %i[ call command_call ].include?(call&.first)
-    call && call_name(call) == method_name && receiver&.first == :var_ref &&
+    call && call_name(call) == method_name && simplecov_receiver?(receiver)
+  end
+
+  def simplecov_receiver?(receiver)
+    case receiver&.first
+    when :var_ref, :top_const_ref
       receiver.dig(1, 0) == :@const && receiver.dig(1, 1) == "SimpleCov"
+    when :paren
+      expressions = receiver[1]
+      expressions.one? && simplecov_receiver?(expressions.first)
+    else
+      false
+    end
   end
 
   def direct_mutator?(call)
@@ -173,7 +184,9 @@ RSpec.describe "SimpleCov configuration" do
         inside: [ 'SimpleCov.start "rails" do', "end" ]
       ),
       "duplicate start" => valid_source(after: [ 'SimpleCov.start "rails" do', "end" ]),
-      "blockless start" => valid_source(after: [ 'SimpleCov.start "rails"' ])
+      "blockless start" => valid_source(after: [ 'SimpleCov.start "rails"' ]),
+      "top-level constant blockless start" => valid_source(after: [ '::SimpleCov.start "rails"' ]),
+      "parenthesized nested start" => valid_source(inside: [ '(SimpleCov).start "rails" do', "end" ])
     }
 
     aggregate_failures do
