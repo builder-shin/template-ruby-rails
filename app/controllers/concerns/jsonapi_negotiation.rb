@@ -1,13 +1,15 @@
 # frozen_string_literal: true
 
+require "uri"
+
 module JsonapiNegotiation
   extend ActiveSupport::Concern
 
   JSONAPI_MEDIA_TYPE = "application/vnd.api+json"
   WRITE_METHODS = %w[POST PUT PATCH DELETE].freeze
-  MEDIA_TYPE_PARAMETERS = %w[ext profile].freeze
   TOKEN = /\A[!#$%&'*+.^_`|~0-9A-Za-z-]+\z/
   QUALITY = /\A(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)\z/
+  URI_LIST = /\A[^\s"]+(?: [^\s"]+)*\z/
 
   included do
     before_action :negotiate_jsonapi_request
@@ -17,7 +19,7 @@ module JsonapiNegotiation
 
   def negotiate_jsonapi_request
     validate_jsonapi_accept!
-    return unless WRITE_METHODS.include?(request.request_method) && jsonapi_body.present?
+    return unless WRITE_METHODS.include?(request.request_method) && jsonapi_body.bytesize.positive?
 
     validate_jsonapi_content_type!
     validate_jsonapi_document!
@@ -37,14 +39,12 @@ module JsonapiNegotiation
       specificity = { JSONAPI_MEDIA_TYPE => 2, "application/*" => 1, "*/*" => 0 }[media_range]
       next unless specificity
 
-      allowed = media_range == JSONAPI_MEDIA_TYPE ? MEDIA_TYPE_PARAMETERS + [ "q" ] : [ "q" ]
-      if (parameters.keys - allowed).any?
-        qualities[specificity] << 0.0 if media_range == JSONAPI_MEDIA_TYPE
-        next
+      if media_range == JSONAPI_MEDIA_TYPE
+        qualities[specificity] << jsonapi_accept_quality(parameters)
+      else
+        quality = parameters.fetch("q", "1")
+        qualities[specificity] << quality.to_f if parameters.keys.all? { |name| name == "q" } && QUALITY.match?(quality)
       end
-
-      quality = parameters.fetch("q", "1")
-      qualities[specificity] << quality.to_f if QUALITY.match?(quality)
     end
 
     accepted = [ 2, 1, 0 ].find { |specificity| qualities.key?(specificity) }
@@ -59,7 +59,7 @@ module JsonapiNegotiation
 
   def validate_jsonapi_content_type!
     parsed = parse_parameterized_value(request.headers["Content-Type"].to_s.strip)
-    valid = parsed && parsed.first == JSONAPI_MEDIA_TYPE && (parsed.last.keys - MEDIA_TYPE_PARAMETERS).empty?
+    valid = parsed && parsed.first == JSONAPI_MEDIA_TYPE && valid_content_type_parameters?(parsed.last)
     return if valid
 
     raise JsonApiError.new(
@@ -111,6 +111,33 @@ module JsonapiNegotiation
 
   def valid_parameter_value?(value)
     TOKEN.match?(value) || (value.start_with?('"') && value.end_with?('"') && !value[1...-1].include?('"'))
+  end
+
+  def jsonapi_accept_quality(parameters)
+    return 0.0 unless (parameters.keys - %w[ext profile q]).empty?
+    return 0.0 if parameters.key?("ext")
+    return 0.0 if parameters.key?("profile") && !valid_uri_list_parameter?(parameters.fetch("profile"))
+
+    quality = parameters.fetch("q", "1")
+    QUALITY.match?(quality) ? quality.to_f : 0.0
+  end
+
+  def valid_content_type_parameters?(parameters)
+    return false unless (parameters.keys - %w[ext profile]).empty?
+    return false if parameters.key?("ext")
+
+    !parameters.key?("profile") || valid_uri_list_parameter?(parameters.fetch("profile"))
+  end
+
+  def valid_uri_list_parameter?(raw_value)
+    return false unless raw_value.start_with?('"') && raw_value.end_with?('"')
+
+    value = raw_value[1...-1]
+    return false unless URI_LIST.match?(value)
+
+    value.split(" ").all? { |uri| URI.parse(uri).absolute? }
+  rescue URI::InvalidURIError
+    false
   end
 
   def split_quoted(value, delimiter)

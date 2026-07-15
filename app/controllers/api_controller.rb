@@ -2,7 +2,6 @@
 
 class ApiController < ApplicationController
   include CrudActions
-  include JsonapiErrors
 
   before_action :set_current_user
 

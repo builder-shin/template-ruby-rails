@@ -27,85 +27,183 @@ RSpec.describe "JSON:API errors", type: :request do
     AUTH_SERVICE_UNAVAILABLE
   ].freeze
 
-  before do
-    stub_const("TaskFiveProbeController", Class.new(ApplicationController) do
-      def validation_failure
-        Example.new.validate!
-      end
+  def expect_error(status:, code:)
+    expect(response).to have_http_status(status)
+    expect(response.headers.fetch("Content-Type")).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
+    expect(parsed_body.fetch("errors").first).to include("status" => status.to_s, "code" => code)
+  end
 
-      def unexpected_failure
-        raise StandardError, "PG::UndefinedTable SELECT * FROM secret_table at app/private.rb:42"
-      end
-    end)
+  describe "production routing" do
+    it "keeps ActiveStorage direct uploads ahead of the API fallback" do
+      route = Rails.application.routes.recognize_path(
+        "/rails/active_storage/direct_uploads",
+        method: :post
+      )
 
-    Rails.application.routes.draw do
-      get "/__task_five__/validation", to: "task_five_probe#validation_failure"
-      get "/__task_five__/unexpected", to: "task_five_probe#unexpected_failure"
-      match "*unmatched", to: "application#route_not_found", via: :all
+      expect(route).to include(controller: "active_storage/direct_uploads", action: "create")
+    end
+
+    it "returns an exact JSON:API 404 for an unknown API route" do
+      get "/api/v1/task-five-not-found", headers: { "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE }
+
+      expect_error(status: 404, code: "RESOURCE_NOT_FOUND")
+      expect(parsed_body.fetch("errors").first).to eq(
+        "status" => "404",
+        "code" => "RESOURCE_NOT_FOUND",
+        "title" => "리소스를 찾을 수 없음",
+        "detail" => "요청한 리소스를 찾을 수 없습니다."
+      )
+    end
+
+    it "uses English and varies the cache key by Accept-Language" do
+      get "/api/v1/task-five-not-found",
+          headers: {
+            "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE,
+            "ACCEPT_LANGUAGE" => "en-US, ko;q=0.5"
+          }
+
+      expect_error(status: 404, code: "RESOURCE_NOT_FOUND")
+      expect(response.headers.fetch("Vary").split(",").map(&:strip)).to include("Accept-Language")
+      expect(parsed_body.fetch("errors").first).to include(
+        "title" => "Resource not found",
+        "detail" => "The requested resource could not be found."
+      )
     end
   end
 
-  after do
-    Rails.application.reload_routes!
-  end
+  describe "ApiController error conversion" do
+    let(:base_path) { "/api/__task_five__/errors" }
 
-  it "returns a localized RESOURCE_NOT_FOUND document for an unknown route" do
-    get "/__task_five__/not-found", headers: { "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE }
+    before do
+      stub_const("TaskFiveApiProbeController", Class.new(ApiController) do
+        def klass
+          Example
+        end
 
-    expect(response).to have_http_status(:not_found)
-    expect(response.media_type).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
-    expect(parsed_body.fetch("errors").first).to eq(
-      "status" => "404",
-      "code" => "RESOURCE_NOT_FOUND",
-      "title" => "리소스를 찾을 수 없음",
-      "detail" => "요청한 리소스를 찾을 수 없습니다."
-    )
-  end
+        def parameter_missing
+          params.require(:data)
+        end
 
-  it "uses English when Accept-Language prefers English" do
-    get "/__task_five__/not-found",
-        headers: {
-          "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE,
-          "ACCEPT_LANGUAGE" => "en-US, ko;q=0.5"
-        }
+        def authentication_required
+          user_check!
+        end
 
-    expect(response).to have_http_status(:not_found)
-    expect(parsed_body.fetch("errors").first).to eq(
-      "status" => "404",
-      "code" => "RESOURCE_NOT_FOUND",
-      "title" => "Resource not found",
-      "detail" => "The requested resource could not be found."
-    )
-  end
+        def forbidden
+          enterprise_check!
+        end
 
-  it "maps record validation errors to a stable attribute pointer" do
-    get "/__task_five__/validation", headers: { "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE }
+        def validation_failure
+          Example.new.validate!
+        end
 
-    expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.media_type).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
-    expect(parsed_body.fetch("errors").first).to include(
-      "status" => "422",
-      "code" => "VALIDATION_ERROR",
-      "source" => { "pointer" => "/data/attributes/title" }
-    )
-  end
+        def unexpected_failure
+          response.headers["Vary"] = "Origin, Accept"
+          raise StandardError, "PG::UndefinedTable SELECT * FROM secret_table at app/private.rb:42"
+        end
 
-  it "returns a safe localized 500 without exception internals" do
-    get "/__task_five__/unexpected",
-        headers: {
-          "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE,
-          "ACCEPT_LANGUAGE" => "en"
-        }
+        def typo_code
+          raise ::JsonApiError.new(status: 400, code: "TYPO_CODE")
+        end
+      end)
 
-    expect(response).to have_http_status(:internal_server_error)
-    expect(response.media_type).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
-    expect(parsed_body.fetch("errors").first).to eq(
-      "status" => "500",
-      "code" => "INTERNAL_SERVER_ERROR",
-      "title" => "Internal server error",
-      "detail" => "The server encountered an error while processing the request."
-    )
-    expect(response.body).not_to include("PG::UndefinedTable", "SELECT", "secret_table", "private.rb")
+      Rails.application.routes.draw do
+        get "/api/__task_five__/errors/parameter_missing", to: "task_five_api_probe#parameter_missing"
+        get "/api/__task_five__/errors/authentication_required", to: "task_five_api_probe#authentication_required"
+        get "/api/__task_five__/errors/forbidden", to: "task_five_api_probe#forbidden"
+        get "/api/__task_five__/errors/validation", to: "task_five_api_probe#validation_failure"
+        get "/api/__task_five__/errors/unexpected", to: "task_five_api_probe#unexpected_failure"
+        get "/api/__task_five__/errors/typo", to: "task_five_api_probe#typo_code"
+        get "/api/__task_five__/errors/examples/:id", to: "task_five_api_probe#show"
+      end
+    end
+
+    after do
+      Rails.application.reload_routes!
+    end
+
+    it "does not retain legacy JsonApiError constants or rescue handlers" do
+      expect(ApiController.const_defined?(:JsonApiError, false)).to be(false)
+      expect(ApiController.const_get(:JsonApiError)).to equal(JsonApiError)
+      expect(ApiController.rescue_handlers.map(&:last)).not_to include(
+        :render_jsonapi_internal_server_error,
+        :render_jsonapi_not_found,
+        :render_jsonapi_unprocessable_entity
+      )
+    end
+
+    it "maps ParameterMissing to INVALID_JSONAPI_DOCUMENT" do
+      get "#{base_path}/parameter_missing", headers: jsonapi_headers
+
+      expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+    end
+
+    it "maps the real CrudActions show lookup to a localized RESOURCE_NOT_FOUND" do
+      get "#{base_path}/examples/#{SecureRandom.uuid}",
+          headers: jsonapi_headers(language: "en")
+
+      expect_error(status: 404, code: "RESOURCE_NOT_FOUND")
+      expect(parsed_body.fetch("errors").first).to include("title" => "Resource not found")
+    end
+
+    it "maps missing authentication to AUTHENTICATION_REQUIRED" do
+      get "#{base_path}/authentication_required", headers: jsonapi_headers
+
+      expect_error(status: 401, code: "AUTHENTICATION_REQUIRED")
+    end
+
+    it "maps authorization failure to FORBIDDEN" do
+      mock_authenticated_user
+
+      get "#{base_path}/forbidden", headers: jsonapi_headers(cookie: "valid-session")
+
+      expect_error(status: 403, code: "FORBIDDEN")
+    end
+
+    it "maps auth service failures to AUTH_SERVICE_UNAVAILABLE without exposing details" do
+      mock_auth_service_unavailable
+
+      get "#{base_path}/authentication_required", headers: jsonapi_headers(cookie: "valid-session")
+
+      expect_error(status: 503, code: "AUTH_SERVICE_UNAVAILABLE")
+      expect(response.body).not_to include("인증 서비스에 연결할 수 없습니다")
+    end
+
+    it "maps record validation errors to a stable attribute pointer" do
+      get "#{base_path}/validation", headers: jsonapi_headers
+
+      expect_error(status: 422, code: "VALIDATION_ERROR")
+      expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/title")
+    end
+
+    it "returns a safe 500 for unknown error codes" do
+      get "#{base_path}/typo", headers: jsonapi_headers(language: "en")
+
+      expect_error(status: 500, code: "INTERNAL_SERVER_ERROR")
+      expect(response.body).not_to include("TYPO_CODE", "translation missing")
+    end
+
+    it "returns a safe 500 when a registered error translation is missing" do
+      allow(I18n).to receive(:t).and_wrap_original do |original, key, **options|
+        next nil if key.to_s.start_with?("jsonapi.errors.RESOURCE_NOT_FOUND.")
+
+        original.call(key, **options)
+      end
+
+      get "#{base_path}/examples/#{SecureRandom.uuid}", headers: jsonapi_headers(language: "en")
+
+      expect_error(status: 500, code: "INTERNAL_SERVER_ERROR")
+      expect(response.body).not_to include("RESOURCE_NOT_FOUND", "translation missing")
+    end
+
+    it "returns a safe 500 and preserves existing Vary tokens" do
+      get "#{base_path}/unexpected", headers: jsonapi_headers(language: "en")
+
+      expect_error(status: 500, code: "INTERNAL_SERVER_ERROR")
+      expect(response.headers.fetch("Vary").split(",").map(&:strip)).to eq(
+        [ "Origin", "Accept", "Accept-Language" ]
+      )
+      expect(response.body).not_to include("PG::UndefinedTable", "SELECT", "secret_table", "private.rb")
+    end
   end
 
   it "defines exactly the approved error codes in both locale catalogs" do
@@ -121,5 +219,7 @@ RSpec.describe "JSON:API errors", type: :request do
       expect(errors.values).to all(include("title", "detail"))
       expect(errors.values.flat_map(&:values)).to all(be_present)
     end
+
+    expect(JsonApiError::ERROR_CODES).to contain_exactly(*EXPECTED_ERROR_CODES)
   end
 end

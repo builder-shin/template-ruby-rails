@@ -4,6 +4,16 @@ module JsonapiErrors
   extend ActiveSupport::Concern
 
   JSONAPI_MEDIA_TYPE = "application/vnd.api+json"
+  INTERNAL_ERROR_TEXT = {
+    ko: {
+      title: "서버 내부 오류",
+      detail: "요청을 처리하는 중 서버 오류가 발생했습니다."
+    },
+    en: {
+      title: "Internal server error",
+      detail: "The server encountered an error while processing the request."
+    }
+  }.freeze
 
   included do
     rescue_from StandardError, with: :render_unexpected_jsonapi_error
@@ -19,7 +29,8 @@ module JsonapiErrors
   private
 
   def render_jsonapi_error(error)
-    render_jsonapi_errors([ jsonapi_error_object(error) ], status: error.status)
+    object = jsonapi_error_object(error)
+    render_jsonapi_errors([ object ], status: object.fetch(:status).to_i)
   end
 
   def render_invalid_jsonapi_document(_error)
@@ -47,7 +58,7 @@ module JsonapiErrors
     end
 
     errors << jsonapi_error_object(JsonApiError.new(status: 422, code: "VALIDATION_ERROR")) if errors.empty?
-    render_jsonapi_errors(errors, status: 422)
+    render_jsonapi_errors(errors, status: errors.first.fetch(:status).to_i)
   end
 
   def render_unexpected_jsonapi_error(error)
@@ -56,25 +67,49 @@ module JsonapiErrors
   end
 
   def render_jsonapi_errors(errors, status:)
-    render(
-      json: { errors: errors },
-      status: status,
-      content_type: JSONAPI_MEDIA_TYPE
-    )
+    append_vary_header("Accept-Language")
+    response.status = status
+    response.headers["Content-Type"] = JSONAPI_MEDIA_TYPE
+    self.response_body = JSON.generate(errors: errors)
   end
 
   def jsonapi_error_object(error)
     I18n.with_locale(jsonapi_locale) do
       translation_key = "jsonapi.errors.#{error.code}"
+      title = I18n.t("#{translation_key}.title", default: nil, **error.context)
+      detail = I18n.t("#{translation_key}.detail", default: nil, **error.context)
+      return internal_error_object unless title.present? && detail.present?
+
       object = {
         status: error.status.to_s,
         code: error.code,
-        title: I18n.t!("#{translation_key}.title", **error.context),
-        detail: I18n.t!("#{translation_key}.detail", **error.context)
+        title: title,
+        detail: detail
       }
       object[:source] = error.source if error.source.present?
       object
     end
+  end
+
+  def internal_error_object
+    locale = jsonapi_locale
+    fallback = INTERNAL_ERROR_TEXT.fetch(locale)
+    translation_key = "jsonapi.errors.INTERNAL_SERVER_ERROR"
+
+    {
+      status: "500",
+      code: "INTERNAL_SERVER_ERROR",
+      title: I18n.t("#{translation_key}.title", locale: locale, default: fallback.fetch(:title)),
+      detail: I18n.t("#{translation_key}.detail", locale: locale, default: fallback.fetch(:detail))
+    }
+  end
+
+  def append_vary_header(token)
+    tokens = response.headers["Vary"].to_s.split(",").map(&:strip).reject(&:empty?)
+    return if tokens.include?("*")
+
+    tokens << token unless tokens.any? { |existing| existing.casecmp?(token) }
+    response.headers["Vary"] = tokens.join(", ")
   end
 
   def jsonapi_locale
