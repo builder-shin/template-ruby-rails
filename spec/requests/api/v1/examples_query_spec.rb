@@ -5,6 +5,7 @@ require "uri"
 
 RSpec.describe "Example JSON:API query contract", type: :request do
   PROBE_PATH = "/api/__task_six__/examples"
+  LEGACY_PROBE_PATH = "/api/__task_six__/legacy_examples"
   EXAMPLE_IDS = %w[
     00000000-0000-4000-8000-000000000001
     00000000-0000-4000-8000-000000000002
@@ -34,9 +35,15 @@ RSpec.describe "Example JSON:API query contract", type: :request do
         }
       end
     end)
+    stub_const("TaskSixLegacyExamplesProbeController", Class.new(ApiController) do
+      def klass
+        Example
+      end
+    end)
 
     Rails.application.routes.draw do
       get PROBE_PATH, to: "task_six_examples_query_probe#index"
+      get LEGACY_PROBE_PATH, to: "task_six_legacy_examples_probe#index"
     end
   end
 
@@ -348,5 +355,56 @@ RSpec.describe "Example JSON:API query contract", type: :request do
         expect_query_error(query, code: code, parameter: parameter)
       end
     end
+  end
+
+  it "maps scalar and nested filter shape conflicts in both query orders" do
+    cases = [
+      [ "filter[score]=10&filter[score][exact]=20", "filter[score][exact]" ],
+      [ "filter[score][exact]=20&filter[score]=10", "filter[score]" ],
+      [ "filter[score]=10&filter[score][gt]=20", "filter[score][gt]" ],
+      [ "filter[score][gt]=20&filter[score]=10", "filter[score]" ]
+    ]
+
+    cases.each do |query, parameter|
+      aggregate_failures(query) do
+        expect_query_error(query, code: "INVALID_FILTER", parameter: parameter)
+      end
+    end
+  end
+
+  it "maps scalar and nested sort and page shape conflicts in both query orders" do
+    cases = [
+      [ "sort=score&sort[field]=title", "INVALID_SORT", "sort[field]" ],
+      [ "sort[field]=title&sort=score", "INVALID_SORT", "sort" ],
+      [ "page[number]=1&page[number][extra]=2", "INVALID_PAGE", "page[number][extra]" ],
+      [ "page[number][extra]=2&page[number]=1", "INVALID_PAGE", "page[number]" ]
+    ]
+
+    cases.each do |query, code, parameter|
+      aggregate_failures(query) do
+        expect_query_error(query, code: code, parameter: parameter)
+      end
+    end
+  end
+
+  it "does not install strict query error conversion on a legacy index controller" do
+    get LEGACY_PROBE_PATH, headers: jsonapi_headers
+
+    expect(response).to have_http_status(:ok)
+    expect(parsed_body.fetch("data").pluck("id")).to contain_exactly(*ids_at(0, 1, 2, 3))
+
+    get "#{LEGACY_PROBE_PATH}?sort=score&sort[field]=title", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    expect(response.headers.fetch("Content-Type")).not_to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
+    expect(response.body).not_to include("INVALID_SORT")
+  end
+
+  it "does not swallow an unrelated BadRequest on a strict query controller" do
+    get "#{PROBE_PATH}?unknown=value&unknown[field]=nested", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    expect(response.headers.fetch("Content-Type")).not_to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
+    expect(response.body).not_to include("INVALID_QUERY_PARAMETER")
   end
 end

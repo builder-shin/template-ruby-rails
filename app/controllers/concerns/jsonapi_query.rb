@@ -40,6 +40,18 @@ module JsonapiQuery
 
   private
 
+  def process_action(*)
+    super
+  rescue ActionController::BadRequest
+    conflict = jsonapi_raw_shape_conflict
+    raise unless respond_to?(:query_contract, true) && conflict
+
+    code, parameter = conflict
+    render_jsonapi_error(
+      JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
+    )
+  end
+
   def jsonapi_query(scope)
     Parser.new(
       scope: scope,
@@ -49,6 +61,62 @@ module JsonapiQuery
       model: klass
     ).call
   end
+
+  def jsonapi_raw_shape_conflict
+    RawQuery.shape_conflict(RawQuery.decode(request.query_string))
+  rescue ArgumentError
+    nil
+  end
+
+  class RawQuery
+    ERROR_CODE_BY_FAMILY = {
+      "filter" => "INVALID_FILTER",
+      "sort" => "INVALID_SORT",
+      "include" => "INVALID_INCLUDE",
+      "page" => "INVALID_PAGE"
+    }.freeze
+    PARAMETER = /\A([^\[\]]+)((?:\[[^\[\]]*\])*)\z/
+    SEGMENT = /\[([^\[\]]*)\]/
+
+    class << self
+      def decode(query_string)
+        return [] if query_string.empty?
+
+        pairs = URI.decode_www_form(query_string, Encoding::UTF_8)
+        raise ArgumentError unless pairs.flatten.all?(&:valid_encoding?)
+
+        pairs
+      end
+
+      def shape_conflict(pairs)
+        seen = []
+        pairs.each do |parameter, _|
+          segments = parameter_segments(parameter)
+          next unless segments && ERROR_CODE_BY_FAMILY.key?(segments.first)
+
+          if seen.any? { |prior| strict_prefix?(prior, segments) || strict_prefix?(segments, prior) }
+            return [ ERROR_CODE_BY_FAMILY.fetch(segments.first), parameter ]
+          end
+          seen << segments
+        end
+        nil
+      end
+
+      private
+
+      def parameter_segments(parameter)
+        match = PARAMETER.match(parameter)
+        return unless match
+
+        [ match[1], *match[2].scan(SEGMENT).flatten ]
+      end
+
+      def strict_prefix?(prefix, value)
+        prefix.length < value.length && value.first(prefix.length) == prefix
+      end
+    end
+  end
+  private_constant :RawQuery
 
   class Parser
     def initialize(scope:, request:, action_params:, contract:, model:)
@@ -72,6 +140,9 @@ module JsonapiQuery
 
     def call
       @raw_pairs = parse_raw_pairs
+      if (conflict = RawQuery.shape_conflict(@raw_pairs))
+        invalid_query!(*conflict)
+      end
       @raw_pairs.each { |parameter, value| parse_parameter(parameter, value) }
       validate_action_controller_parameters!
       validate_page_offset!
@@ -94,12 +165,7 @@ module JsonapiQuery
     private
 
     def parse_raw_pairs
-      return [] if @request.query_string.empty?
-
-      pairs = URI.decode_www_form(@request.query_string, Encoding::UTF_8)
-      return pairs if pairs.flatten.all?(&:valid_encoding?)
-
-      invalid_query!("INVALID_QUERY_PARAMETER", @request.query_string)
+      RawQuery.decode(@request.query_string)
     rescue ArgumentError
       invalid_query!("INVALID_QUERY_PARAMETER", @request.query_string)
     end
