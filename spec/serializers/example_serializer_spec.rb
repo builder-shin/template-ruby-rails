@@ -86,12 +86,22 @@ RSpec.describe ExampleSerializer do
       )
     end
 
-    it "lowercases primary and relationship linkage identifiers" do
+    it "lowercases primary, linkage, and canonical link identifiers", :aggregate_failures do
       resource = document.fetch("data")
+      canonical_path = "/api/v1/examples/#{example_id.downcase}"
 
       expect(resource.fetch("id")).to eq(example_id.downcase)
       expect(resource.dig("relationships", "category", "data", "id")).to eq(category_id.downcase)
       expect(resource.dig("relationships", "tags", "data").pluck("id")).to eq(tag_ids.map(&:downcase))
+      expect(resource.fetch("links")).to eq("self" => canonical_path)
+      expect(resource.dig("relationships", "category", "links")).to eq(
+        "self" => "#{canonical_path}/relationships/category",
+        "related" => "#{canonical_path}/category"
+      )
+      expect(resource.dig("relationships", "tags", "links")).to eq(
+        "self" => "#{canonical_path}/relationships/tags",
+        "related" => "#{canonical_path}/tags"
+      )
     end
   end
 
