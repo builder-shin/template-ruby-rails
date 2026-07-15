@@ -42,8 +42,20 @@ module Api
 
       def allowed_relationships
         {
-          category: :one,
-          tags: :many
+          category: {
+            association: :category,
+            cardinality: :one,
+            type: "exampleCategories",
+            serializer: ExampleCategorySerializer,
+            model: ExampleCategory
+          },
+          tags: {
+            association: :tags,
+            cardinality: :many,
+            type: "exampleTags",
+            serializer: ExampleTagSerializer,
+            model: ExampleTag
+          }
         }
       end
 

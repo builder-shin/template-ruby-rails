@@ -1,0 +1,208 @@
+# frozen_string_literal: true
+
+module JsonapiRelationships
+  extend ActiveSupport::Concern
+
+  def category_relationship
+    render_relationship_linkage(:category)
+  end
+
+  def replace_category_relationship
+    mutate_relationship(:category, :replace)
+  end
+
+  def related_category
+    render_related_resource(:category)
+  end
+
+  def tags_relationship
+    render_relationship_linkage(:tags)
+  end
+
+  def add_tags_relationship
+    mutate_relationship(:tags, :add)
+  end
+
+  def replace_tags_relationship
+    mutate_relationship(:tags, :replace)
+  end
+
+  def remove_tags_relationship
+    mutate_relationship(:tags, :remove)
+  end
+
+  def related_tags
+    render_related_resource(:tags)
+  end
+
+  def relationship_after_save(_success); end
+
+  private
+
+  def render_relationship_linkage(name)
+    policy = relationship_policy(name)
+    model = relationship_parent
+    related = model.public_send(policy.fetch(:association))
+
+    render_jsonapi_payload(
+      {
+        data: relationship_data(policy, related),
+        links: {
+          self: relationship_url(model, name),
+          related: related_url(model, name)
+        }
+      },
+      status: :ok
+    )
+  end
+
+  def render_related_resource(name)
+    policy = relationship_policy(name)
+    model = relationship_parent
+    related = model.public_send(policy.fetch(:association))
+    payload = policy.fetch(:serializer).new(related).serializable_hash
+
+    render_jsonapi_payload(payload, status: :ok)
+  end
+
+  def mutate_relationship(name, mutation)
+    policy = relationship_policy(name)
+    raw_linkage = relationship_linkage!(policy)
+
+    ActiveRecord::Base.transaction do
+      model = relationship_parent(lock: true)
+      related = resolve_relationship_resources!(policy, raw_linkage)
+      apply_relationship_mutation(model, policy, mutation, related)
+      relationship_after_save(true)
+      serialize_jsonapi(model.reload)
+    end
+
+    head :no_content
+  end
+
+  def relationship_policy(name)
+    allowed_relationships.fetch(name)
+  end
+
+  def relationship_parent(lock: false)
+    scope = lock ? klass.lock : klass
+    model = scope.find_by(id: normalized_resource_id(params[:id]))
+    return model if model
+
+    raise JsonApiError.new(status: 404, code: "RESOURCE_NOT_FOUND")
+  end
+
+  def relationship_linkage!(policy)
+    unless params.key?(:data)
+      raise_invalid_relationship_document("/data")
+    end
+
+    linkage = params[:data]
+    if policy.fetch(:cardinality) == :many
+      raise_invalid_relationship_document("/data") unless linkage.is_a?(Array)
+    elsif !linkage.nil? && !linkage.is_a?(ActionController::Parameters)
+      raise_invalid_relationship_document("/data")
+    end
+    linkage
+  end
+
+  def resolve_relationship_resources!(policy, linkage)
+    return nil if linkage.nil?
+
+    identifiers = policy.fetch(:cardinality) == :many ? linkage : [ linkage ]
+    normalized_ids = identifiers.each_with_index.map do |identifier, index|
+      pointer = policy.fetch(:cardinality) == :many ? "/data/#{index}" : "/data"
+      normalize_relationship_identifier!(policy, identifier, pointer)
+    end
+    found = policy.fetch(:model).where(id: normalized_ids).index_by { |record| record.id.to_s.downcase }
+    resources = normalized_ids.each_with_index.map do |identifier, index|
+      resource = found[identifier]
+      next resource if resource
+
+      pointer = policy.fetch(:cardinality) == :many ? "/data/#{index}/id" : "/data/id"
+      raise JsonApiError.new(
+        status: 404,
+        code: "RELATIONSHIP_RESOURCE_NOT_FOUND",
+        source: { pointer: pointer }
+      )
+    end
+
+    policy.fetch(:cardinality) == :many ? resources : resources.first
+  end
+
+  def normalize_relationship_identifier!(policy, identifier, pointer)
+    raise_invalid_relationship_document(pointer) unless identifier.is_a?(ActionController::Parameters)
+
+    if identifier[:type] != policy.fetch(:type)
+      raise JsonApiError.new(
+        status: 409,
+        code: "TYPE_MISMATCH",
+        source: { pointer: "#{pointer}/type" }
+      )
+    end
+
+    value = identifier[:id].to_s
+    begin
+      normalized_resource_id(value)
+    rescue JsonApiError
+      raise JsonApiError.new(
+        status: 404,
+        code: "RELATIONSHIP_RESOURCE_NOT_FOUND",
+        source: { pointer: "#{pointer}/id" }
+      )
+    end
+  end
+
+  def apply_relationship_mutation(model, policy, mutation, related)
+    association = policy.fetch(:association)
+    if policy.fetch(:cardinality) == :one
+      model.update!(association => related)
+    elsif mutation == :add
+      insert_relationship_rows(model, association, related)
+    elsif mutation == :replace
+      model.public_send("#{association}=", related)
+    else
+      model.public_send(association).delete(*related)
+    end
+  end
+
+  def insert_relationship_rows(model, association, related)
+    reflection = model.class.reflect_on_association(association)
+    join_reflection = reflection.through_reflection
+    rows = related.map do |record|
+      {
+        join_reflection.foreign_key => model.id,
+        reflection.source_reflection.foreign_key => record.id
+      }
+    end
+    join_reflection.klass.insert_all(rows) if rows.any?
+    model.association(association).reset
+  end
+
+  def relationship_identifier(policy, record)
+    { type: policy.fetch(:type), id: record.id.to_s.downcase }
+  end
+
+  def relationship_data(policy, related)
+    return related.map { |record| relationship_identifier(policy, record) } if policy.fetch(:cardinality) == :many
+    return relationship_identifier(policy, related) if related
+
+    nil
+  end
+
+  def relationship_url(model, name)
+    "/api/v1/examples/#{model.id.to_s.downcase}/relationships/#{name}"
+  end
+
+  def related_url(model, name)
+    "/api/v1/examples/#{model.id.to_s.downcase}/#{name}"
+  end
+
+  def raise_invalid_relationship_document(pointer)
+    raise JsonApiError.new(
+      status: 400,
+      code: "INVALID_JSONAPI_DOCUMENT",
+      source: { pointer: pointer }
+    )
+  end
+end

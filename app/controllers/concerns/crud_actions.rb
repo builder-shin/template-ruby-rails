@@ -10,6 +10,7 @@ module CrudActions
     include JSONAPI::Filtering
     include JSONAPI::Pagination
     include JsonapiQuery
+    include JsonapiRelationships
 
     before_action :_set_model, only: [ :show, :update, :destroy ]
 
@@ -377,7 +378,8 @@ module CrudActions
   end
 
   def reset_write_relationships!(model)
-    allowed_relationships.each do |association, cardinality|
+    allowed_relationships.each do |association, policy|
+      cardinality = policy.is_a?(Hash) ? policy.fetch(:cardinality) : policy
       value = cardinality == :many ? [] : nil
       model.public_send("#{association}=", value)
     end
