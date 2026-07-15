@@ -81,8 +81,24 @@ RSpec.describe "SimpleCov configuration" do
     return false unless call && call_name(call) == "filters"
     return true if %i[ vcall fcall ].include?(call.first)
 
-    call.first == :call && call.dig(2, 0) == :@period && call.dig(1, 0) == :var_ref &&
-      call.dig(1, 1, 0) == :@kw && call.dig(1, 1, 1) == "self"
+    call.first == :call && static_self_operator?(call[2]) && static_self_receiver?(call[1])
+  end
+
+  def static_self_operator?(operator)
+    (operator&.first == :@period && operator[1] == ".") ||
+      (operator&.first == :@op && %w[ &. :: ].include?(operator[1]))
+  end
+
+  def static_self_receiver?(receiver)
+    case receiver&.first
+    when :var_ref
+      receiver.dig(1, 0) == :@kw && receiver.dig(1, 1) == "self"
+    when :paren
+      expressions = receiver[1]
+      expressions.one? && static_self_receiver?(expressions.first)
+    else
+      false
+    end
   end
 
   def mutation_calls(node, start_block:, inside_start_block: false)
@@ -197,7 +213,13 @@ RSpec.describe "SimpleCov configuration" do
         "filters().clear",
         'filters() << "app/generated/"',
         "self.filters.clear",
-        'self.filters << "app/generated/"'
+        'self.filters << "app/generated/"',
+        "self&.filters.clear",
+        'self&.filters << "app/generated/"',
+        "(self).filters.clear",
+        '(self).filters << "app/generated/"',
+        "self::filters.clear",
+        'self::filters << "app/generated/"'
       ]
     )
 
@@ -237,6 +259,14 @@ RSpec.describe "SimpleCov configuration" do
       "appended fcall DSL filter collection" => valid_source(inside: [ 'filters() << "app/generated/"' ]),
       "cleared self DSL filter collection" => valid_source(inside: [ "self.filters.clear" ]),
       "appended self DSL filter collection" => valid_source(inside: [ 'self.filters << "app/generated/"' ]),
+      "cleared safe self DSL filter collection" => valid_source(inside: [ "self&.filters.clear" ]),
+      "appended safe self DSL filter collection" => valid_source(inside: [ 'self&.filters << "app/generated/"' ]),
+      "cleared parenthesized self DSL filter collection" => valid_source(inside: [ "(self).filters.clear" ]),
+      "appended parenthesized self DSL filter collection" => valid_source(
+        inside: [ '(self).filters << "app/generated/"' ]
+      ),
+      "cleared scoped self DSL filter collection" => valid_source(inside: [ "self::filters.clear" ]),
+      "appended scoped self DSL filter collection" => valid_source(inside: [ 'self::filters << "app/generated/"' ]),
       "parenthesized nested start" => valid_source(inside: [ '(SimpleCov).start "rails" do', "end" ])
     }
 
