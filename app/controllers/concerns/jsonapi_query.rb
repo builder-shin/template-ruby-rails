@@ -7,6 +7,10 @@ require "set"
 module JsonapiQuery
   extend ActiveSupport::Concern
 
+  included do
+    before_action :raise_pending_jsonapi_query_shape_conflict
+  end
+
   DEFAULT_PAGE_SIZE = 20
   MAX_PAGE_SIZE = 100
   MAX_SQL_INTEGER = (2**63) - 1
@@ -41,15 +45,8 @@ module JsonapiQuery
   private
 
   def process_action(*)
+    prepare_jsonapi_query_shape_conflict
     super
-  rescue ActionController::BadRequest
-    conflict = jsonapi_raw_shape_conflict
-    raise unless respond_to?(:query_contract, true) && conflict
-
-    code, parameter = conflict
-    render_jsonapi_error(
-      JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
-    )
   end
 
   def jsonapi_query(scope)
@@ -62,10 +59,28 @@ module JsonapiQuery
     ).call
   end
 
-  def jsonapi_raw_shape_conflict
-    RawQuery.shape_conflict(RawQuery.decode(request.query_string))
+  def prepare_jsonapi_query_shape_conflict
+    return unless respond_to?(:query_contract, true)
+
+    conflict, sanitized_pairs = RawQuery.sanitize_shape_conflicts(RawQuery.decode(request.query_string))
+    return unless conflict
+
+    @pending_jsonapi_query_shape_conflict = conflict
+    request.set_header("QUERY_STRING", URI.encode_www_form(sanitized_pairs))
+    request.delete_header("action_dispatch.request.query_parameters")
+    request.delete_header("action_dispatch.request.parameters")
+    request.instance_variable_set(:@filtered_parameters, nil)
+    request.instance_variable_set(:@filtered_path, nil)
   rescue ArgumentError
     nil
+  end
+
+  def raise_pending_jsonapi_query_shape_conflict
+    return unless action_name == "index" && respond_to?(:query_contract, true)
+    return unless @pending_jsonapi_query_shape_conflict
+
+    code, parameter = @pending_jsonapi_query_shape_conflict
+    raise JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
   end
 
   class RawQuery
@@ -89,17 +104,26 @@ module JsonapiQuery
       end
 
       def shape_conflict(pairs)
-        seen = []
-        pairs.each do |parameter, _|
-          segments = parameter_segments(parameter)
-          next unless segments && ERROR_CODE_BY_FAMILY.key?(segments.first)
+        sanitize_shape_conflicts(pairs).first
+      end
 
-          if seen.any? { |prior| strict_prefix?(prior, segments) || strict_prefix?(segments, prior) }
-            return [ ERROR_CODE_BY_FAMILY.fetch(segments.first), parameter ]
+      def sanitize_shape_conflicts(pairs)
+        conflict = nil
+        kept_segments = []
+        sanitized_pairs = pairs.reject do |parameter, _|
+          segments = parameter_segments(parameter)
+          next false unless segments && ERROR_CODE_BY_FAMILY.key?(segments.first)
+
+          if kept_segments.any? { |prior| strict_prefix?(prior, segments) || strict_prefix?(segments, prior) }
+            conflict ||= [ ERROR_CODE_BY_FAMILY.fetch(segments.first), parameter ]
+            next true
           end
-          seen << segments
+
+          kept_segments << segments
+          false
         end
-        nil
+
+        [ conflict, sanitized_pairs ]
       end
 
       private

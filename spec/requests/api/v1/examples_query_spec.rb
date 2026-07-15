@@ -19,6 +19,10 @@ RSpec.describe "Example JSON:API query contract", type: :request do
         Example
       end
 
+      def non_index_probe
+        head :no_content
+      end
+
       private
 
       def query_contract
@@ -43,6 +47,8 @@ RSpec.describe "Example JSON:API query contract", type: :request do
 
     Rails.application.routes.draw do
       get PROBE_PATH, to: "task_six_examples_query_probe#index"
+      post PROBE_PATH, to: "task_six_examples_query_probe#index"
+      get "#{PROBE_PATH}/non_index", to: "task_six_examples_query_probe#non_index_probe"
       get LEGACY_PROBE_PATH, to: "task_six_legacy_examples_probe#index"
     end
   end
@@ -145,6 +151,15 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     expect(document).to have_key("errors"), "#{query.inspect} returned #{document.inspect}"
     error = document.fetch("errors").first
     expect(error).to include("status" => "400", "code" => code)
+    expect(error.fetch("source")).to eq("parameter" => parameter)
+  end
+
+  def expect_jsonapi_error(status:, code:, parameter:)
+    error = parsed_body.fetch("errors").first
+
+    expect(response).to have_http_status(status)
+    expect(response.headers.fetch("Content-Type")).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
+    expect(error).to include("status" => status.to_s, "code" => code)
     expect(error.fetch("source")).to eq("parameter" => parameter)
   end
 
@@ -385,6 +400,63 @@ RSpec.describe "Example JSON:API query contract", type: :request do
         expect_query_error(query, code: code, parameter: parameter)
       end
     end
+  end
+
+  it "negotiates Accept before classifying either filter shape conflict order" do
+    queries = [
+      "filter[score]=10&filter[score][gt]=20",
+      "filter[score][gt]=20&filter[score]=10"
+    ]
+
+    queries.each do |query|
+      aggregate_failures(query) do
+        get "#{PROBE_PATH}?#{query}", headers: { "ACCEPT" => "application/json" }
+
+        expect_jsonapi_error(status: 406, code: "NOT_ACCEPTABLE", parameter: "Accept")
+      end
+    end
+  end
+
+  it "negotiates a body-present write Content-Type before classifying a query shape conflict" do
+    post "#{PROBE_PATH}?filter[score]=10&filter[score][gt]=20",
+         params: { data: {} }.to_json,
+         headers: {
+           "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE,
+           "CONTENT_TYPE" => "application/json"
+         }
+
+    expect_jsonapi_error(status: 415, code: "UNSUPPORTED_MEDIA_TYPE", parameter: "Content-Type")
+  end
+
+  it "only emits strict query shape errors for the index action" do
+    get "#{PROBE_PATH}/non_index?filter[score]=10&filter[score][gt]=20", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:no_content)
+
+    get "#{PROBE_PATH}/non_index?filter[score]=10&filter[score][gt]=20",
+        headers: { "ACCEPT" => "application/json" }
+
+    expect_jsonapi_error(status: 406, code: "NOT_ACCEPTABLE", parameter: "Accept")
+  end
+
+  it "keeps controller lifecycle notifications for a compatible shape conflict" do
+    events = []
+    subscribers = %w[start_processing.action_controller process_action.action_controller].map do |event_name|
+      ActiveSupport::Notifications.subscribe(event_name) do |*arguments|
+        event = ActiveSupport::Notifications::Event.new(*arguments)
+        events << event.name if event.payload[:controller] == "TaskSixExamplesQueryProbeController"
+      end
+    end
+
+    get "#{PROBE_PATH}?filter[score]=10&filter[score][gt]=20", headers: jsonapi_headers
+
+    expect_jsonapi_error(status: 400, code: "INVALID_FILTER", parameter: "filter[score][gt]")
+    expect(events).to contain_exactly(
+      "start_processing.action_controller",
+      "process_action.action_controller"
+    )
+  ensure
+    subscribers&.each { |subscriber| ActiveSupport::Notifications.unsubscribe(subscriber) }
   end
 
   it "does not install strict query error conversion on a legacy index controller" do
