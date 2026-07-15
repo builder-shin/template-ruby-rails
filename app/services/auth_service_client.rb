@@ -80,8 +80,9 @@ class AuthServiceClient
 
     case response.status
     when 200
+      user = parse_user_response(response.body)
       self.class.record_success
-      parse_user_response(response.body)
+      user
     when 401
       # 401 is a valid auth rejection, not a service failure
       raise AuthenticationError, "인증에 실패했습니다."
@@ -89,6 +90,9 @@ class AuthServiceClient
       self.class.record_failure
       raise ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다."
     end
+  rescue JSON::ParserError
+    self.class.record_failure
+    raise ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다."
   rescue Faraday::TimeoutError, Faraday::ConnectionFailed
     self.class.record_failure
     raise ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다."
@@ -97,14 +101,15 @@ class AuthServiceClient
   def connection
     @connection ||= Faraday.new(url: config.url) do |conn|
       conn.request :json
-      conn.response :json
       conn.request :retry, max: 2, interval: 0.1, retry_statuses: [ 502, 503, 504 ]
       conn.options.timeout = config.timeout
     end
   end
 
   def parse_user_response(body)
-    return nil unless body["success"] && body["data"]
+    body = JSON.parse(body)
+    raise JSON::ParserError, "Auth response must be a JSON object" unless body.is_a?(Hash)
+    return nil unless body["success"] && body["data"].is_a?(Hash)
 
     AuthUser.new(
       body["data"].slice("id", "email", "name", "workspace_id",

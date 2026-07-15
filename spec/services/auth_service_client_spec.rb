@@ -5,6 +5,7 @@ require "rails_helper"
 RSpec.describe AuthServiceClient do
   let(:client) { described_class.new }
   let(:session_token) { "test_token_12345" }
+  let(:malformed_body) { "upstream-secret:{" }
 
   # Circuit breaker 는 클래스 레벨 상태를 공유하므로 예제 간 격리를 위해 리셋
   before { described_class.reset_circuit! }
@@ -79,6 +80,23 @@ RSpec.describe AuthServiceClient do
       end
     end
 
+    context "인증 실패 401 응답이 malformed JSON인 경우" do
+      before do
+        stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
+          .to_return(
+            status: 401,
+            body: malformed_body,
+            headers: { "Content-Type" => "application/json" }
+          )
+      end
+
+      it "본문을 파싱하지 않고 AuthenticationError를 발생시킨다" do
+        expect { client.verify_session(session_token) }
+          .to raise_error(AuthServiceClient::AuthenticationError, "인증에 실패했습니다.")
+      end
+    end
+
     context "서비스 오류 시 (500)" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
@@ -89,6 +107,41 @@ RSpec.describe AuthServiceClient do
       it "ServiceUnavailableError를 발생시킨다" do
         expect { client.verify_session(session_token) }
           .to raise_error(AuthServiceClient::ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다.")
+      end
+    end
+
+    context "서비스 500 응답이 malformed JSON인 경우" do
+      before do
+        stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
+          .to_return(
+            status: 500,
+            body: malformed_body,
+            headers: { "Content-Type" => "application/json" }
+          )
+      end
+
+      it "본문을 파싱하지 않고 ServiceUnavailableError를 발생시킨다" do
+        expect { client.verify_session(session_token) }
+          .to raise_error(AuthServiceClient::ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다.")
+      end
+    end
+
+    context "성공 200 응답이 malformed JSON인 경우" do
+      before do
+        stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
+          .to_return(
+            status: 200,
+            body: malformed_body,
+            headers: { "Content-Type" => "application/json" }
+          )
+      end
+
+      it "실패를 기록하고 ServiceUnavailableError를 발생시킨다" do
+        expect { client.verify_session(session_token) }
+          .to raise_error(AuthServiceClient::ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다.")
+        expect(described_class.circuit_state.fetch(:failure_count)).to eq(1)
       end
     end
 

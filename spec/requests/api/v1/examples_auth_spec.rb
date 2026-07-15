@@ -113,6 +113,35 @@ RSpec.describe "Example authentication boundary", type: :request do
     end
   end
 
+  it "anonymous DELETE는 존재하지 않는 UUID도 조회 전에 401로 거부한다" do
+    expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
+
+    perform_jsonapi(:delete, resource_path(SecureRandom.uuid))
+
+    expect_auth_error(:unauthorized, "AUTHENTICATION_REQUIRED")
+  end
+
+  it "active cookie DELETE는 인증을 한 번만 확인한 뒤 존재하지 않는 UUID를 404로 반환한다" do
+    token = "missing-resource-session"
+    auth_url = "#{Rails.application.config.x.auth_service.url}/api/auth/me"
+    stub_auth_request(
+      token,
+      status: 200,
+      body: auth_user_response.to_json,
+      headers: { "Content-Type" => "application/json" }
+    )
+
+    perform_jsonapi(
+      :delete,
+      resource_path(SecureRandom.uuid),
+      headers: jsonapi_headers.merge(auth_cookie_headers(token))
+    )
+
+    expect_auth_error(:not_found, "RESOURCE_NOT_FOUND")
+    expect(WebMock).to have_requested(:get, auth_url)
+      .with(headers: { "Cookie" => "session_web=#{token}" }).once
+  end
+
   it "Authorization header만으로는 인증하지 않는다" do
     expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
 
@@ -160,6 +189,26 @@ RSpec.describe "Example authentication boundary", type: :request do
     expect_auth_error(:unauthorized, "AUTHENTICATION_REQUIRED", leaked_detail: "upstream secret")
   end
 
+  it "malformed JSON 외부 401도 status를 우선해 안전한 401로 변환한다" do
+    token = "malformed-401-session"
+    leaked_body = "upstream-401-secret:{"
+    stub_auth_request(
+      token,
+      status: 401,
+      body: leaked_body,
+      headers: { "Content-Type" => "application/json" }
+    )
+
+    perform_jsonapi(
+      :post,
+      collection_path,
+      body: example_document,
+      headers: jsonapi_headers.merge(auth_cookie_headers(token))
+    )
+
+    expect_auth_error(:unauthorized, "AUTHENTICATION_REQUIRED", leaked_detail: leaked_body)
+  end
+
   it "외부 인증 timeout을 안전한 503으로 변환한다" do
     token = "timeout-session"
     stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me").to_timeout
@@ -201,6 +250,47 @@ RSpec.describe "Example authentication boundary", type: :request do
     )
 
     expect_auth_error(:service_unavailable, "AUTH_SERVICE_UNAVAILABLE", leaked_detail: "upstream secret")
+  end
+
+  it "malformed JSON 외부 5xx도 status를 우선해 안전한 503으로 변환한다" do
+    token = "malformed-500-session"
+    leaked_body = "upstream-500-secret:{"
+    stub_auth_request(
+      token,
+      status: 500,
+      body: leaked_body,
+      headers: { "Content-Type" => "application/json" }
+    )
+
+    perform_jsonapi(
+      :post,
+      collection_path,
+      body: example_document,
+      headers: jsonapi_headers.merge(auth_cookie_headers(token))
+    )
+
+    expect_auth_error(:service_unavailable, "AUTH_SERVICE_UNAVAILABLE", leaked_detail: leaked_body)
+  end
+
+  it "malformed JSON 외부 200을 안전한 503으로 변환하고 실패로 기록한다" do
+    token = "malformed-200-session"
+    leaked_body = "upstream-200-secret:{"
+    stub_auth_request(
+      token,
+      status: 200,
+      body: leaked_body,
+      headers: { "Content-Type" => "application/json" }
+    )
+
+    perform_jsonapi(
+      :post,
+      collection_path,
+      body: example_document,
+      headers: jsonapi_headers.merge(auth_cookie_headers(token))
+    )
+
+    expect_auth_error(:service_unavailable, "AUTH_SERVICE_UNAVAILABLE", leaked_detail: leaked_body)
+    expect(AuthServiceClient.circuit_state.fetch(:failure_count)).to eq(1)
   end
 
   it "열린 circuit을 안전한 503으로 변환하고 외부 호출을 생략한다" do

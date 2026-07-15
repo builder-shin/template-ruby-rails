@@ -6,7 +6,7 @@ module Api
       RESOURCE_UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
       private_constant :RESOURCE_UUID
 
-      before_action :require_active_user!, only: %i[
+      PROTECTED_WRITE_ACTIONS = %i[
         create
         update
         upsert
@@ -15,7 +15,11 @@ module Api
         add_tags_relationship
         replace_tags_relationship
         remove_tags_relationship
-      ]
+      ].freeze
+      private_constant :PROTECTED_WRITE_ACTIONS
+
+      skip_before_action :set_current_user, only: PROTECTED_WRITE_ACTIONS
+      prepend_before_action :authenticate_write!, only: PROTECTED_WRITE_ACTIONS
       skip_before_action :_set_model, only: :update
 
       def allowed_includes
@@ -23,6 +27,11 @@ module Api
       end
 
       private
+
+      def authenticate_write!
+        set_current_user
+        require_active_user!
+      end
 
       def serializer_class
         ExampleSerializer
