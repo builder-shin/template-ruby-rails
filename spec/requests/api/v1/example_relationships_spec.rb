@@ -167,6 +167,17 @@ RSpec.describe "Example relationships", type: :request do
     expect(example.reload.tags).to be_empty
   end
 
+  it "rejects duplicate tag linkage with the second identifier pointer" do
+    example = create(:example)
+    tag = create(:example_tag)
+    duplicate = identifier("exampleTags", tag)
+
+    mutate(:post, relationship_path(example, "tags"), [ duplicate, duplicate ])
+
+    expect_error(:bad_request, "INVALID_JSONAPI_DOCUMENT", pointer: "/data/1/id")
+    expect(example.reload.tags).to be_empty
+  end
+
   it "rolls back a complete tag replacement when a related resource is missing" do
     example = create(:example)
     existing = create(:example_tag)

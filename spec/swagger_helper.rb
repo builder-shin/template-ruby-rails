@@ -54,7 +54,7 @@ RSpec.configure do |config|
     "Example 생성 또는 전체 교체",
     "ExampleDocument",
     protected: true,
-    request_schema: "ExampleUpdateDocument"
+    request_schema: "ExampleReplaceDocument"
   )
   upsert_operation[:responses]["201"] = document_response.call("ExampleDocument")
 
@@ -84,7 +84,7 @@ RSpec.configure do |config|
             "Example 일부 수정",
             "ExampleDocument",
             protected: true,
-            request_schema: "ExampleUpdateDocument"
+            request_schema: "ExamplePatchDocument"
           ),
           put: upsert_operation,
           delete: operation.call("Example 삭제", status: "204", protected: true)
@@ -150,8 +150,28 @@ RSpec.configure do |config|
               updatedAt: { type: "string", format: "date-time", readOnly: true }
             }
           },
-          ExampleWriteAttributes: {
+          ExampleCreateAttributes: {
             type: "object",
+            required: [ "title" ],
+            properties: {
+              title: { type: "string", maxLength: 200 },
+              description: { type: "string", nullable: true },
+              status: { type: "string", enum: %w[draft active archived] },
+              score: { type: "integer", minimum: 0, maximum: 100 }
+            }
+          },
+          ExamplePatchAttributes: {
+            type: "object",
+            properties: {
+              title: { type: "string", maxLength: 200 },
+              description: { type: "string", nullable: true },
+              status: { type: "string", enum: %w[draft active archived] },
+              score: { type: "integer", minimum: 0, maximum: 100 }
+            }
+          },
+          ExampleReplaceAttributes: {
+            type: "object",
+            required: [ "title" ],
             properties: {
               title: { type: "string", maxLength: 200 },
               description: { type: "string", nullable: true },
@@ -267,23 +287,43 @@ RSpec.configure do |config|
                 required: %w[type attributes],
                 properties: {
                   type: { type: "string", enum: [ "examples" ] },
-                  attributes: { "$ref" => "#/components/schemas/ExampleWriteAttributes" },
+                  attributes: { "$ref" => "#/components/schemas/ExampleCreateAttributes" },
                   relationships: { "$ref" => "#/components/schemas/ExampleWriteRelationships" }
                 }
               }
             }
           },
-          ExampleUpdateDocument: {
+          ExamplePatchDocument: {
             type: "object",
             required: [ "data" ],
             properties: {
               data: {
                 type: "object",
                 required: %w[type id],
+                anyOf: [
+                  { required: [ "attributes" ] },
+                  { required: [ "relationships" ] }
+                ],
                 properties: {
                   type: { type: "string", enum: [ "examples" ] },
                   id: { type: "string", format: "uuid" },
-                  attributes: { "$ref" => "#/components/schemas/ExampleWriteAttributes" },
+                  attributes: { "$ref" => "#/components/schemas/ExamplePatchAttributes" },
+                  relationships: { "$ref" => "#/components/schemas/ExampleWriteRelationships" }
+                }
+              }
+            }
+          },
+          ExampleReplaceDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                type: "object",
+                required: %w[type id attributes],
+                properties: {
+                  type: { type: "string", enum: [ "examples" ] },
+                  id: { type: "string", format: "uuid" },
+                  attributes: { "$ref" => "#/components/schemas/ExampleReplaceAttributes" },
                   relationships: { "$ref" => "#/components/schemas/ExampleWriteRelationships" }
                 }
               }

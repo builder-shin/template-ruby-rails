@@ -9,6 +9,7 @@ module JsonapiQuery
 
   included do
     before_action :raise_pending_jsonapi_query_shape_conflict
+    before_action :validate_jsonapi_action_query!
   end
 
   DEFAULT_PAGE_SIZE = 20
@@ -81,6 +82,55 @@ module JsonapiQuery
 
     code, parameter = @pending_jsonapi_query_shape_conflict
     raise JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
+  end
+
+  def validate_jsonapi_action_query!
+    return unless respond_to?(:jsonapi_query_mode, true)
+
+    pairs = RawQuery.decode(request.query_string)
+    return if pairs.empty? || jsonapi_query_mode == :collection
+
+    if jsonapi_query_mode == :include_only
+      validate_include_only_query!(pairs)
+      return
+    end
+
+    parameter = pairs.first.first
+    raise JsonApiError.new(
+      status: 400,
+      code: "INVALID_QUERY_PARAMETER",
+      source: { parameter: parameter }
+    )
+  rescue ArgumentError
+    raise JsonApiError.new(
+      status: 400,
+      code: "INVALID_QUERY_PARAMETER",
+      source: { parameter: request.query_string }
+    )
+  end
+
+  def validate_include_only_query!(pairs)
+    seen_include = false
+    pairs.each do |parameter, value|
+      family = parameter.split("[", 2).first
+      unless parameter == "include" && !seen_include
+        code = {
+          "filter" => "INVALID_FILTER",
+          "sort" => "INVALID_SORT",
+          "include" => "INVALID_INCLUDE",
+          "page" => "INVALID_PAGE"
+        }.fetch(family, "INVALID_QUERY_PARAMETER")
+        raise JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
+      end
+
+      seen_include = true
+      next if value.empty?
+
+      paths = value.split(",", -1)
+      unless paths.any? && paths.none?(&:empty?) && (paths - query_contract.fetch(:includes)).empty?
+        raise JsonApiError.new(status: 400, code: "INVALID_INCLUDE", source: { parameter: parameter })
+      end
+    end
   end
 
   class RawQuery
@@ -161,12 +211,12 @@ module JsonapiQuery
         shape_trees = {}
         sanitized_pairs = pairs.reject do |parameter, _|
           segments = parameter_segments(parameter)
-          next false unless segments && ERROR_CODE_BY_FAMILY.key?(segments.first)
+          next false unless segments
 
           family = segments.first
           shape_tree = shape_trees[family] ||= ShapeTree.new
           if shape_tree.conflict?(segments.drop(1))
-            conflict ||= [ ERROR_CODE_BY_FAMILY.fetch(family), parameter ]
+            conflict ||= [ ERROR_CODE_BY_FAMILY.fetch(family, "INVALID_QUERY_PARAMETER"), parameter ]
             next true
           end
 

@@ -230,18 +230,18 @@ module CrudActions
   def destroy_after_save(success); end
 
   def destroy
+    _set_model unless @model
     destroy_after_init
     return if performed?
 
-    unless @model.destroy
-      destroy_after_save(false)
-      return if performed?
-
-      return render jsonapi_errors: @model.errors, status: :unprocessable_entity
+    destroyed = false
+    ActiveRecord::Base.transaction do
+      destroyed = @model.destroy
+      destroy_after_save(destroyed)
     end
 
-    destroy_after_save(true)
     return if performed?
+    return render jsonapi_errors: @model.errors, status: :unprocessable_entity unless destroyed
 
     head :no_content
   end
@@ -327,7 +327,9 @@ module CrudActions
 
     validate_write_member_shape!(data, :attributes)
     validate_write_member_shape!(data, :relationships)
+    validate_allowed_attributes!(data[:attributes])
     validate_allowed_relationships!(data[:relationships])
+    validate_embedded_relationships!(data[:relationships])
     return unless require_update_members && !data.key?(:attributes) && !data.key?(:relationships)
 
     raise JsonApiError.new(
@@ -363,6 +365,20 @@ module CrudActions
     defaults
   end
 
+  def validate_allowed_attributes!(attributes)
+    return unless attributes
+
+    allowed = Array(model_params_options[:only]).map(&:to_s) & klass.column_names
+    unsupported = attributes.keys.map(&:to_s).find { |name| !allowed.include?(name) }
+    return unless unsupported
+
+    raise JsonApiError.new(
+      status: 400,
+      code: "INVALID_JSONAPI_DOCUMENT",
+      source: { pointer: "/data/attributes/#{unsupported}" }
+    )
+  end
+
   def validate_allowed_relationships!(relationships)
     return unless relationships
 
@@ -375,6 +391,29 @@ module CrudActions
       code: "INVALID_JSONAPI_DOCUMENT",
       source: { pointer: "/data/relationships/#{unsupported}" }
     )
+  end
+
+  def validate_embedded_relationships!(relationships)
+    return unless relationships
+
+    relationships.each do |name, relationship|
+      pointer = "/data/relationships/#{name}"
+      raise_invalid_relationship_document(pointer) unless relationship.is_a?(ActionController::Parameters)
+
+      unsupported = relationship.keys.map(&:to_s).find { |member| member != "data" }
+      raise_invalid_relationship_document("#{pointer}/#{unsupported}") if unsupported
+      raise_invalid_relationship_document("#{pointer}/data") unless relationship.key?(:data)
+
+      policy = allowed_relationships.fetch(name.to_sym)
+      linkage = relationship[:data]
+      if policy.fetch(:cardinality) == :many
+        raise_invalid_relationship_document("#{pointer}/data") unless linkage.is_a?(Array)
+      elsif !linkage.nil? && !linkage.is_a?(ActionController::Parameters)
+        raise_invalid_relationship_document("#{pointer}/data")
+      end
+
+      resolve_relationship_resources!(policy, linkage, pointer_prefix: "#{pointer}/data")
+    end
   end
 
   def reset_write_relationships!(model)

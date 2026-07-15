@@ -26,6 +26,19 @@ RSpec.describe "Swagger contract" do
     )
   end
 
+  def request_schema_ref(path, method)
+    openapi.dig(
+      :paths,
+      path,
+      method,
+      :requestBody,
+      :content,
+      "application/vnd.api+json",
+      :schema,
+      "$ref"
+    )
+  end
+
   it "uses the local port and exact document schema for each public read path" do
     expect(openapi.fetch(:servers)).to eq([ { url: "http://localhost:4000" } ])
     expect(response_schema_ref("/api/v1/examples", :get, "200"))
@@ -57,6 +70,21 @@ RSpec.describe "Swagger contract" do
       .to eq("#/components/schemas/ExampleCategoryResource")
     expect(schemas.dig(:TagCollectionDocument, :properties, :data, :items, "$ref"))
       .to eq("#/components/schemas/ExampleTagResource")
+  end
+
+  it "uses distinct create, patch, and replace schemas for write semantics" do
+    expect(request_schema_ref("/api/v1/examples", :post))
+      .to eq("#/components/schemas/ExampleCreateDocument")
+    expect(request_schema_ref("/api/v1/examples/{id}", :patch))
+      .to eq("#/components/schemas/ExamplePatchDocument")
+    expect(request_schema_ref("/api/v1/examples/{id}", :put))
+      .to eq("#/components/schemas/ExampleReplaceDocument")
+
+    expect(schemas.dig(:ExampleCreateAttributes, :required)).to eq([ "title" ])
+    expect(schemas.dig(:ExampleReplaceAttributes, :required)).to eq([ "title" ])
+    expect(schemas.dig(:ExamplePatchDocument, :properties, :data, :anyOf)).to eq(
+      [ { required: [ "attributes" ] }, { required: [ "relationships" ] } ]
+    )
   end
 
   it "ships a generated Swagger document and verifies it in CI and the production image" do

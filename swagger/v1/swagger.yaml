@@ -66,7 +66,7 @@ paths:
         content:
           application/vnd.api+json:
             schema:
-              "$ref": "#/components/schemas/ExampleUpdateDocument"
+              "$ref": "#/components/schemas/ExamplePatchDocument"
     put:
       summary: Example 생성 또는 전체 교체
       responses:
@@ -89,7 +89,7 @@ paths:
         content:
           application/vnd.api+json:
             schema:
-              "$ref": "#/components/schemas/ExampleUpdateDocument"
+              "$ref": "#/components/schemas/ExampleReplaceDocument"
     delete:
       summary: Example 삭제
       responses:
@@ -297,8 +297,50 @@ components:
           type: string
           format: date-time
           readOnly: true
-    ExampleWriteAttributes:
+    ExampleCreateAttributes:
       type: object
+      required:
+      - title
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - archived
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+    ExamplePatchAttributes:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - archived
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+    ExampleReplaceAttributes:
+      type: object
+      required:
+      - title
       properties:
         title:
           type: string
@@ -426,10 +468,10 @@ components:
               enum:
               - examples
             attributes:
-              "$ref": "#/components/schemas/ExampleWriteAttributes"
+              "$ref": "#/components/schemas/ExampleCreateAttributes"
             relationships:
               "$ref": "#/components/schemas/ExampleWriteRelationships"
-    ExampleUpdateDocument:
+    ExamplePatchDocument:
       type: object
       required:
       - data
@@ -439,6 +481,11 @@ components:
           required:
           - type
           - id
+          anyOf:
+          - required:
+            - attributes
+          - required:
+            - relationships
           properties:
             type:
               type: string
@@ -448,7 +495,30 @@ components:
               type: string
               format: uuid
             attributes:
-              "$ref": "#/components/schemas/ExampleWriteAttributes"
+              "$ref": "#/components/schemas/ExamplePatchAttributes"
+            relationships:
+              "$ref": "#/components/schemas/ExampleWriteRelationships"
+    ExampleReplaceDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          type: object
+          required:
+          - type
+          - id
+          - attributes
+          properties:
+            type:
+              type: string
+              enum:
+              - examples
+            id:
+              type: string
+              format: uuid
+            attributes:
+              "$ref": "#/components/schemas/ExampleReplaceAttributes"
             relationships:
               "$ref": "#/components/schemas/ExampleWriteRelationships"
     ExampleDocument:

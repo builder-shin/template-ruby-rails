@@ -84,6 +84,117 @@ RSpec.describe "Example CRUD", type: :request do
     expect(persisted.tag_ids).to contain_exactly(*tags.map(&:id))
   end
 
+  it "rejects unknown attributes instead of silently discarding them" do
+    perform_jsonapi(
+      :post,
+      collection_path,
+      document(attributes: { title: "Known", privateField: "secret" })
+    )
+
+    expect_error(
+      :bad_request,
+      "INVALID_JSONAPI_DOCUMENT",
+      pointer: "/data/attributes/privateField"
+    )
+    expect(Example.count).to eq(0)
+  end
+
+  it "validates embedded relationship object and linkage shapes before persistence" do
+    cases = [
+      [ { category: "not-an-object" }, "/data/relationships/category" ],
+      [ { category: { data: [] } }, "/data/relationships/category/data" ],
+      [ { tags: { data: {} } }, "/data/relationships/tags/data" ],
+      [ { tags: { data: [ "not-an-identifier" ] } }, "/data/relationships/tags/data/0" ],
+      [
+        { tags: { data: [ { type: "exampleTags", id: SecureRandom.uuid, extra: true } ] } },
+        "/data/relationships/tags/data/0/extra"
+      ]
+    ]
+
+    cases.each do |relationships, pointer|
+      aggregate_failures(pointer) do
+        perform_jsonapi(
+          :post,
+          collection_path,
+          document(attributes: { title: "Rejected" }, relationships: relationships)
+        )
+
+        expect_error(:bad_request, "INVALID_JSONAPI_DOCUMENT", pointer: pointer)
+      end
+    end
+    expect(Example.count).to eq(0)
+  end
+
+  it "maps embedded relationship type, id, existence, and duplicate failures exactly" do
+    tag = create(:example_tag)
+    cases = [
+      [
+        { category: { data: { type: "exampleTags", id: tag.id } } },
+        :conflict,
+        "TYPE_MISMATCH",
+        "/data/relationships/category/data/type"
+      ],
+      [
+        { category: { data: { type: "exampleCategories", id: "not-a-uuid" } } },
+        :not_found,
+        "RELATIONSHIP_RESOURCE_NOT_FOUND",
+        "/data/relationships/category/data/id"
+      ],
+      [
+        { category: { data: { type: "exampleCategories", id: SecureRandom.uuid } } },
+        :not_found,
+        "RELATIONSHIP_RESOURCE_NOT_FOUND",
+        "/data/relationships/category/data/id"
+      ],
+      [
+        {
+          tags: {
+            data: [
+              { type: "exampleTags", id: tag.id },
+              { type: "exampleTags", id: tag.id }
+            ]
+          }
+        },
+        :bad_request,
+        "INVALID_JSONAPI_DOCUMENT",
+        "/data/relationships/tags/data/1/id"
+      ]
+    ]
+
+    cases.each do |relationships, status, code, pointer|
+      aggregate_failures(pointer) do
+        perform_jsonapi(
+          :post,
+          collection_path,
+          document(attributes: { title: "Rejected" }, relationships: relationships)
+        )
+
+        expect_error(status, code, pointer: pointer)
+      end
+    end
+    expect(Example.count).to eq(0)
+  end
+
+  it "rolls back PATCH attributes when an embedded relationship resource is missing" do
+    example = create(:example, title: "Before")
+    relationships = {
+      category: { data: { type: "exampleCategories", id: SecureRandom.uuid } }
+    }
+
+    perform_jsonapi(
+      :patch,
+      resource_path(example),
+      document(attributes: { title: "After" }, relationships: relationships, id: example.id)
+    )
+
+    expect_error(
+      :not_found,
+      "RELATIONSHIP_RESOURCE_NOT_FOUND",
+      pointer: "/data/relationships/category/data/id"
+    )
+    expect(example.reload.title).to eq("Before")
+  end
+
   it "partially updates attributes without replacing relationships" do
     example = create(:example, :with_category, :with_tags, title: "Before", description: "Keep")
     category_id = example.category_id
@@ -136,6 +247,21 @@ RSpec.describe "Example CRUD", type: :request do
     expect(response).to have_http_status(:no_content)
     expect(response.body).to be_empty
     expect(Example.exists?(example.id)).to be(false)
+  end
+
+  it "rolls back DELETE when the after hook fails" do
+    example = create(:example)
+    tag = create(:example_tag)
+    tagging = create(:example_tagging, example: example, example_tag: tag)
+    allow_any_instance_of(Api::V1::ExamplesController).to receive(:destroy_after_save)
+      .and_raise(StandardError, "hook failure")
+
+    perform_jsonapi(:delete, resource_path(example))
+
+    expect_error(:internal_server_error, "INTERNAL_SERVER_ERROR")
+    expect(Example.exists?(example.id)).to be(true)
+    expect(ExampleTagging.exists?(tagging.attributes.slice("example_id", "example_tag_id"))).to be(true)
+    expect(example.reload.tag_ids).to eq([ tag.id ])
   end
 
   it "rejects a non-resource data member" do

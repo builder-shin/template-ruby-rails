@@ -161,6 +161,25 @@ RSpec.describe "Example atomic PUT upsert", type: :request do
     expect(example.tag_ids).to eq([ original_tag.id ])
   end
 
+  it "rejects a missing embedded relationship before replacing the resource" do
+    example = create(:example, title: "Before", status: "active", score: 75)
+    relationships = {
+      category: { data: { type: "exampleCategories", id: SecureRandom.uuid } }
+    }
+
+    perform_put(
+      example.id,
+      put_document(id: example.id, title: "After", relationships: relationships)
+    )
+
+    expect(response).to have_http_status(:not_found)
+    expect(parsed_body.fetch("errors").first).to include(
+      "code" => "RELATIONSHIP_RESOURCE_NOT_FOUND",
+      "source" => { "pointer" => "/data/relationships/category/data/id" }
+    )
+    expect(example.reload).to have_attributes(title: "Before", status: "active", score: 75)
+  end
+
   describe "concurrent requests" do
     self.use_transactional_tests = false
 

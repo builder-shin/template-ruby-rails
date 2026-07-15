@@ -513,11 +513,17 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     expect(response.body).not_to include("INVALID_SORT")
   end
 
-  it "does not swallow an unrelated BadRequest on a strict query controller" do
-    get "#{PROBE_PATH}?unknown=value&unknown[field]=nested", headers: jsonapi_headers
+  it "maps arbitrary scalar and nested query shape collisions without leaking Rails errors" do
+    cases = [
+      [ "unknown=value&unknown[field]=nested", "unknown[field]" ],
+      [ "unknown[field]=nested&unknown=value", "unknown" ]
+    ]
 
-    expect(response).to have_http_status(:bad_request)
-    expect(response.headers.fetch("Content-Type")).not_to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
-    expect(response.body).not_to include("INVALID_QUERY_PARAMETER")
+    cases.each do |query, parameter|
+      aggregate_failures(query) do
+        expect_query_error(query, code: "INVALID_QUERY_PARAMETER", parameter: parameter)
+        expect(response.body).not_to include("ActionController::BadRequest", "Conflicting types")
+      end
+    end
   end
 end

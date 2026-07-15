@@ -87,6 +87,63 @@ RSpec.describe "Example authentication boundary", type: :request do
     end
   end
 
+  it "stale cookie가 있어도 6개 공개 읽기에서 Auth 조회를 생략한다" do
+    category = create(:example_category)
+    tag = create(:example_tag)
+    example = create(:example, category: category)
+    create(:example_tagging, example: example, example_tag: tag)
+    auth_client = instance_double(AuthServiceClient)
+    allow(AuthServiceClient).to receive(:new).and_return(auth_client)
+    allow(auth_client).to receive(:verify_session).and_return(nil)
+    paths = [
+      collection_path,
+      resource_path(example),
+      relationship_path(example, "category"),
+      "#{resource_path(example)}/category",
+      relationship_path(example, "tags"),
+      "#{resource_path(example)}/tags"
+    ]
+
+    paths.each do |path|
+      get path, headers: jsonapi_headers.merge(auth_cookie_headers("stale-session"))
+
+      expect(response).to have_http_status(:ok)
+    end
+    expect(auth_client).not_to have_received(:verify_session)
+  end
+
+  it "Auth 장애를 6개 공개 읽기와 분리하되 쓰기 503 경계는 유지한다" do
+    category = create(:example_category)
+    tag = create(:example_tag)
+    example = create(:example, category: category)
+    create(:example_tagging, example: example, example_tag: tag)
+    auth_client = instance_double(AuthServiceClient)
+    allow(AuthServiceClient).to receive(:new).and_return(auth_client)
+    allow(auth_client).to receive(:verify_session)
+      .and_raise(AuthServiceClient::ServiceUnavailableError, "outage secret")
+    headers = jsonapi_headers.merge(auth_cookie_headers("outage-session"))
+    paths = [
+      collection_path,
+      resource_path(example),
+      relationship_path(example, "category"),
+      "#{resource_path(example)}/category",
+      relationship_path(example, "tags"),
+      "#{resource_path(example)}/tags"
+    ]
+
+    paths.each do |path|
+      get path, headers: headers
+
+      expect(response).to have_http_status(:ok)
+    end
+    expect(auth_client).not_to have_received(:verify_session)
+
+    perform_jsonapi(:post, collection_path, body: example_document, headers: headers)
+
+    expect_auth_error(:service_unavailable, "AUTH_SERVICE_UNAVAILABLE", leaked_detail: "outage secret")
+    expect(auth_client).to have_received(:verify_session).once
+  end
+
   it "쿠키가 없으면 정확히 8개 쓰기 액션을 401로 거부한다" do
     example = create(:example)
     category = create(:example_category)
@@ -111,6 +168,71 @@ RSpec.describe "Example authentication boundary", type: :request do
 
       expect_auth_error(:unauthorized, "AUTHENTICATION_REQUIRED")
     end
+  end
+
+  it "익명 쓰기에서 media negotiation을 인증보다 먼저 적용한다" do
+    example = create(:example)
+    category = create(:example_category)
+    tag = create(:example_tag)
+    update_document = example_document(id: example.id)
+    tag_linkage = relationship_document([ { type: "exampleTags", id: tag.id } ])
+    writes = [
+      [ :post, collection_path, example_document ],
+      [ :patch, resource_path(example), update_document ],
+      [ :put, resource_path(example), update_document ],
+      [ :delete, resource_path(example), nil ],
+      [
+        :patch,
+        relationship_path(example, "category"),
+        relationship_document({ type: "exampleCategories", id: category.id })
+      ],
+      [ :post, relationship_path(example, "tags"), tag_linkage ],
+      [ :patch, relationship_path(example, "tags"), tag_linkage ],
+      [ :delete, relationship_path(example, "tags"), tag_linkage ]
+    ]
+    expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
+
+    writes.each do |method, path, body|
+      aggregate_failures("#{method} #{path} Accept") do
+        perform_jsonapi(
+          method,
+          path,
+          body: body,
+          headers: jsonapi_headers.merge("ACCEPT" => "application/json")
+        )
+
+        expect_auth_error(:not_acceptable, "NOT_ACCEPTABLE")
+        expect(parsed_body.dig("errors", 0, "source")).to eq("parameter" => "Accept")
+      end
+    end
+
+    writes.reject { |method, path, body| method == :delete && path == resource_path(example) && body.nil? }
+      .each do |method, path, body|
+        aggregate_failures("#{method} #{path} Content-Type") do
+          perform_jsonapi(
+            method,
+            path,
+            body: body,
+            headers: jsonapi_headers.merge("CONTENT_TYPE" => "application/json")
+          )
+
+          expect_auth_error(:unsupported_media_type, "UNSUPPORTED_MEDIA_TYPE")
+          expect(parsed_body.dig("errors", 0, "source")).to eq("parameter" => "Content-Type")
+        end
+      end
+  end
+
+  it "정상 media의 unsupported query를 인증보다 먼저 거부한다" do
+    expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
+
+    perform_jsonapi(
+      :post,
+      "#{collection_path}?fields[examples]=title",
+      body: example_document
+    )
+
+    expect_auth_error(:bad_request, "INVALID_QUERY_PARAMETER")
+    expect(parsed_body.dig("errors", 0, "source")).to eq("parameter" => "fields[examples]")
   end
 
   it "anonymous DELETE는 존재하지 않는 UUID도 조회 전에 401로 거부한다" do

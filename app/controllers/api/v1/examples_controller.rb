@@ -18,9 +18,9 @@ module Api
       ].freeze
       private_constant :PROTECTED_WRITE_ACTIONS
 
-      skip_before_action :set_current_user, only: PROTECTED_WRITE_ACTIONS
-      prepend_before_action :authenticate_write!, only: PROTECTED_WRITE_ACTIONS
-      skip_before_action :_set_model, only: :update
+      skip_before_action :set_current_user
+      before_action :authenticate_write!, only: PROTECTED_WRITE_ACTIONS
+      skip_before_action :_set_model, only: %i[update destroy]
 
       def allowed_includes
         %i[category tags]
@@ -57,6 +57,10 @@ module Api
           sorts: %w[title status score createdAt updatedAt],
           includes: %w[category tags]
         }
+      end
+
+      def jsonapi_query_mode
+        { "index" => :collection, "show" => :include_only }.fetch(action_name, :none)
       end
 
       def allowed_relationships

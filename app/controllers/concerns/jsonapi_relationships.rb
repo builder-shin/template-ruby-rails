@@ -106,20 +106,27 @@ module JsonapiRelationships
     linkage
   end
 
-  def resolve_relationship_resources!(policy, linkage)
+  def resolve_relationship_resources!(policy, linkage, pointer_prefix: "/data")
     return nil if linkage.nil?
 
     identifiers = policy.fetch(:cardinality) == :many ? linkage : [ linkage ]
     normalized_ids = identifiers.each_with_index.map do |identifier, index|
-      pointer = policy.fetch(:cardinality) == :many ? "/data/#{index}" : "/data"
+      pointer = policy.fetch(:cardinality) == :many ? "#{pointer_prefix}/#{index}" : pointer_prefix
       normalize_relationship_identifier!(policy, identifier, pointer)
+    end
+    seen_ids = {}
+    normalized_ids.each_with_index do |identifier, index|
+      next seen_ids[identifier] = true unless seen_ids.key?(identifier)
+
+      pointer = policy.fetch(:cardinality) == :many ? "#{pointer_prefix}/#{index}/id" : "#{pointer_prefix}/id"
+      raise_invalid_relationship_document(pointer)
     end
     found = policy.fetch(:model).where(id: normalized_ids).index_by { |record| record.id.to_s.downcase }
     resources = normalized_ids.each_with_index.map do |identifier, index|
       resource = found[identifier]
       next resource if resource
 
-      pointer = policy.fetch(:cardinality) == :many ? "/data/#{index}/id" : "/data/id"
+      pointer = policy.fetch(:cardinality) == :many ? "#{pointer_prefix}/#{index}/id" : "#{pointer_prefix}/id"
       raise JsonApiError.new(
         status: 404,
         code: "RELATIONSHIP_RESOURCE_NOT_FOUND",
@@ -132,6 +139,11 @@ module JsonapiRelationships
 
   def normalize_relationship_identifier!(policy, identifier, pointer)
     raise_invalid_relationship_document(pointer) unless identifier.is_a?(ActionController::Parameters)
+
+    unsupported = identifier.keys.map(&:to_s).find { |member| !%w[type id].include?(member) }
+    raise_invalid_relationship_document("#{pointer}/#{unsupported}") if unsupported
+    missing = %w[type id].find { |member| !identifier.key?(member) }
+    raise_invalid_relationship_document("#{pointer}/#{missing}") if missing
 
     if identifier[:type] != policy.fetch(:type)
       raise JsonApiError.new(
