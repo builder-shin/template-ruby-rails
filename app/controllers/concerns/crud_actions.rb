@@ -9,6 +9,7 @@ module CrudActions
     include JSONAPI::Fetching
     include JSONAPI::Filtering
     include JSONAPI::Pagination
+    include JsonapiQuery
 
     before_action :_set_model, only: [ :show, :update, :destroy ]
 
@@ -38,6 +39,8 @@ module CrudActions
 
   def index
     scope = respond_to?(:index_scope, true) ? index_scope : klass.all
+    return render_jsonapi_query_index(scope) if respond_to?(:query_contract, true)
+
     scope = scope.includes(includes_for_active_record) if jsonapi_include.present?
 
     # Enum 필터 값을 integer로 변환
@@ -49,6 +52,17 @@ module CrudActions
 
     # Explicitly pass include option to jsonapi-serializer
     render jsonapi: paginated.load, include: jsonapi_include.map(&:to_sym)
+  end
+
+  def render_jsonapi_query_index(scope)
+    result = jsonapi_query(scope)
+    render jsonapi: result.scope.load,
+           include: result.includes.map(&:to_sym),
+           meta: { totalCount: result.total_count },
+           links: result.links
+
+    ensure_included_array! if result.include_requested
+    response.headers["Content-Type"] = JSONAPI::MEDIA_TYPE
   end
 
   # Ransack enum 필터 문제 해결: 문자열 enum 값을 integer로 변환
@@ -226,6 +240,14 @@ module CrudActions
   end
 
   private
+
+  def ensure_included_array!
+    document = JSON.parse(response.body)
+    return if document.key?("included")
+
+    document["included"] = []
+    self.response_body = JSON.generate(document)
+  end
 
   def model_params
     jsonapi_deserialize(params, model_params_options)
