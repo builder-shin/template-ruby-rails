@@ -49,6 +49,52 @@ RSpec.describe ExampleSerializer do
     end
   end
 
+  describe "identifier normalization" do
+    let(:options) { { is_collection: false } }
+    let(:example_id) { "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA" }
+    let(:category_id) { "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB" }
+    let(:tag_ids) do
+      [
+        "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC",
+        "DDDDDDDD-DDDD-4DDD-8DDD-DDDDDDDDDDDD"
+      ]
+    end
+    let(:relationship_record_class) { Struct.new(:id, :name, keyword_init: true) }
+    let(:category) { relationship_record_class.new(id: category_id, name: "Controlled Category") }
+    let(:tags) do
+      tag_ids.map.with_index do |id, index|
+        relationship_record_class.new(id: id, name: "Controlled Tag #{index + 1}")
+      end
+    end
+    let(:example) do
+      Struct.new(
+        :id, :title, :description, :status, :score, :created_at, :updated_at,
+        :category_id, :tag_ids, :category, :tags,
+        keyword_init: true
+      ).new(
+        id: example_id,
+        title: "Controlled Example",
+        description: nil,
+        status: "draft",
+        score: 0,
+        created_at: Time.zone.parse("2026-07-15 00:00:00"),
+        updated_at: Time.zone.parse("2026-07-15 00:00:00"),
+        category_id: category_id,
+        tag_ids: tag_ids,
+        category: category,
+        tags: tags
+      )
+    end
+
+    it "lowercases primary and relationship linkage identifiers" do
+      resource = document.fetch("data")
+
+      expect(resource.fetch("id")).to eq(example_id.downcase)
+      expect(resource.dig("relationships", "category", "data", "id")).to eq(category_id.downcase)
+      expect(resource.dig("relationships", "tags", "data").pluck("id")).to eq(tag_ids.map(&:downcase))
+    end
+  end
+
   describe "included resources" do
     let(:options) { { include: %i[category tags] } }
 
@@ -56,17 +102,22 @@ RSpec.describe ExampleSerializer do
       let(:example) { create(:example, :with_category, :with_tags) }
 
       it "includes category and tags without non-canonical self links" do
-        included = document.fetch("included")
-        category = included.find { |resource| resource.fetch("type") == "exampleCategories" }
-        tags = included.select { |resource| resource.fetch("type") == "exampleTags" }
+        expected = [
+          {
+            "id" => example.category.id.downcase,
+            "type" => "exampleCategories",
+            "attributes" => { "name" => example.category.name }
+          },
+          *example.tags.map do |tag|
+            {
+              "id" => tag.id.downcase,
+              "type" => "exampleTags",
+              "attributes" => { "name" => tag.name }
+            }
+          end
+        ]
 
-        expect(category.fetch("id")).to eq(example.category_id.downcase)
-        expect(category.fetch("attributes")).to eq("name" => example.category.name)
-        expect(category).not_to have_key("links")
-
-        expect(tags.map { |resource| resource.fetch("id") }).to eq(example.tag_ids.map(&:downcase))
-        expect(tags.map { |resource| resource.fetch("attributes").keys }.uniq).to eq([ [ "name" ] ])
-        expect(tags).to all(satisfy { |resource| !resource.key?("links") })
+        expect(document.fetch("included")).to eq(expected)
       end
     end
 
