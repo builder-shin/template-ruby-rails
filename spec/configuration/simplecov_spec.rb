@@ -77,6 +77,14 @@ RSpec.describe "SimpleCov configuration" do
     %w[ track_files minimum_coverage add_filter ].include?(call_name(call))
   end
 
+  def static_dsl_filters_call?(call)
+    return false unless call && call_name(call) == "filters"
+    return true if %i[ vcall fcall ].include?(call.first)
+
+    call.first == :call && call.dig(2, 0) == :@period && call.dig(1, 0) == :var_ref &&
+      call.dig(1, 1, 0) == :@kw && call.dig(1, 1, 1) == "self"
+  end
+
   def mutation_calls(node, start_block:, inside_start_block: false)
     return [] unless node.is_a?(Array)
 
@@ -85,7 +93,7 @@ RSpec.describe "SimpleCov configuration" do
       mutation_calls(child, start_block:, inside_start_block:)
     end
     call = base_call(node)
-    dsl_filters = inside_start_block && call&.first == :vcall && call_name(call) == "filters"
+    dsl_filters = inside_start_block && static_dsl_filters_call?(call)
     is_mutation = call.equal?(node) &&
       (direct_mutator?(call) || dsl_filters ||
        %w[ start configure filters ].any? { |name| simplecov_call?(call, name) })
@@ -181,8 +189,25 @@ RSpec.describe "SimpleCov configuration" do
     )
   end
 
-  it "ignores receiverless filters access outside the approved start block" do
-    source = valid_source(after: [ "filters.clear", 'filters << "app/generated/"' ])
+  it "ignores static filters access outside the approved start block" do
+    source = valid_source(
+      after: [
+        "filters.clear",
+        'filters << "app/generated/"',
+        "filters().clear",
+        'filters() << "app/generated/"',
+        "self.filters.clear",
+        'self.filters << "app/generated/"'
+      ]
+    )
+
+    expect(call_declarations(source, "track_files")).to eq([ 'track_files "app/**/*.rb"' ])
+  end
+
+  it "ignores dynamic filters lookup inside the approved start block" do
+    source = valid_source(
+      inside: [ 'eval("filters").clear', "send(:filters).clear", "Object.const_get(:SimpleCov).filters.clear" ]
+    )
 
     expect(call_declarations(source, "track_files")).to eq([ 'track_files "app/**/*.rb"' ])
   end
@@ -208,6 +233,10 @@ RSpec.describe "SimpleCov configuration" do
       "appended filter collection" => valid_source(after: [ 'SimpleCov.filters << "app/generated/"' ]),
       "cleared DSL filter collection" => valid_source(inside: [ "filters.clear" ]),
       "appended DSL filter collection" => valid_source(inside: [ 'filters << "app/generated/"' ]),
+      "cleared fcall DSL filter collection" => valid_source(inside: [ "filters().clear" ]),
+      "appended fcall DSL filter collection" => valid_source(inside: [ 'filters() << "app/generated/"' ]),
+      "cleared self DSL filter collection" => valid_source(inside: [ "self.filters.clear" ]),
+      "appended self DSL filter collection" => valid_source(inside: [ 'self.filters << "app/generated/"' ]),
       "parenthesized nested start" => valid_source(inside: [ '(SimpleCov).start "rails" do', "end" ])
     }
 
