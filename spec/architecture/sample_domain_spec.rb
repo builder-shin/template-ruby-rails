@@ -6,7 +6,7 @@ require "open3"
 RSpec.describe "Sample domain architecture" do
   def tracked_source_files
     stdout, status = Open3.capture2(
-      "git", "ls-files", "-z", "--", "app/**/*.rb", "config/**/*.rb", "Gemfile", ".env.example",
+      "git", "ls-files", "-z", "--", "app/**/*.rb", "config/**/*.rb", "Gemfile", "Gemfile.lock", ".env.example",
       chdir: Rails.root.to_s
     )
 
@@ -23,10 +23,10 @@ RSpec.describe "Sample domain architecture" do
 
   it "does not retain the legacy blog, email, SendGrid, or Sentry integrations" do
     forbidden_patterns = {
-      "Blog" => /Blog|blog_/,
-      "EmailTemplate" => /EmailTemplate/,
-      "SendGrid" => /SendGrid|SENDGRID|sendgrid/,
-      "Sentry" => /Sentry|SENTRY|sentry/
+      "Blog" => /blog/i,
+      "EmailTemplate" => /email_?template/i,
+      "SendGrid" => /sendgrid/i,
+      "Sentry" => /sentry/i
     }
 
     violations = tracked_source.flat_map do |path, contents|
