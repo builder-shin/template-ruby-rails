@@ -93,6 +93,55 @@ module JsonapiQuery
     PARAMETER = /\A([^\[\]]+)((?:\[[^\[\]]*\])*)\z/
     SEGMENT = /\[([^\[\]]*)\]/
 
+    class ShapeTree
+      class Node
+        attr_accessor :terminal, :container_kind
+        attr_reader :children
+
+        def initialize
+          @terminal = false
+          @container_kind = nil
+          @children = {}
+        end
+      end
+      private_constant :Node
+
+      def initialize
+        @root = Node.new
+      end
+
+      def conflict?(segments)
+        node = @root
+        segments.each do |segment|
+          return true if node.terminal
+
+          kind = container_kind(segment)
+          return true if node.container_kind && node.container_kind != kind
+
+          node = node.children[segment]
+          return false unless node
+        end
+
+        !node.container_kind.nil?
+      end
+
+      def add(segments)
+        node = @root
+        segments.each do |segment|
+          node.container_kind ||= container_kind(segment)
+          node = node.children[segment] ||= Node.new
+        end
+        node.terminal = true
+      end
+
+      private
+
+      def container_kind(segment)
+        segment.empty? ? :array : :hash
+      end
+    end
+    private_constant :ShapeTree
+
     class << self
       def decode(query_string)
         return [] if query_string.empty?
@@ -109,17 +158,19 @@ module JsonapiQuery
 
       def sanitize_shape_conflicts(pairs)
         conflict = nil
-        kept_segments = []
+        shape_trees = {}
         sanitized_pairs = pairs.reject do |parameter, _|
           segments = parameter_segments(parameter)
           next false unless segments && ERROR_CODE_BY_FAMILY.key?(segments.first)
 
-          if kept_segments.any? { |prior| strict_prefix?(prior, segments) || strict_prefix?(segments, prior) }
-            conflict ||= [ ERROR_CODE_BY_FAMILY.fetch(segments.first), parameter ]
+          family = segments.first
+          shape_tree = shape_trees[family] ||= ShapeTree.new
+          if shape_tree.conflict?(segments.drop(1))
+            conflict ||= [ ERROR_CODE_BY_FAMILY.fetch(family), parameter ]
             next true
           end
 
-          kept_segments << segments
+          shape_tree.add(segments.drop(1))
           false
         end
 
@@ -133,10 +184,6 @@ module JsonapiQuery
         return unless match
 
         [ match[1], *match[2].scan(SEGMENT).flatten ]
-      end
-
-      def strict_prefix?(prefix, value)
-        prefix.length < value.length && value.first(prefix.length) == prefix
       end
     end
   end

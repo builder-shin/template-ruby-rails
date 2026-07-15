@@ -149,16 +149,21 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     expect(response).to have_http_status(:bad_request)
     expect(response.headers.fetch("Content-Type")).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
     expect(document).to have_key("errors"), "#{query.inspect} returned #{document.inspect}"
+    return unless document["errors"]&.any?
+
     error = document.fetch("errors").first
     expect(error).to include("status" => "400", "code" => code)
     expect(error.fetch("source")).to eq("parameter" => parameter)
   end
 
   def expect_jsonapi_error(status:, code:, parameter:)
-    error = parsed_body.fetch("errors").first
-
     expect(response).to have_http_status(status)
     expect(response.headers.fetch("Content-Type")).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
+    document = parsed_body
+    expect(document).to have_key("errors")
+    return unless document["errors"]&.any?
+
+    error = document.fetch("errors").first
     expect(error).to include("status" => status.to_s, "code" => code)
     expect(error.fetch("source")).to eq("parameter" => parameter)
   end
@@ -398,6 +403,42 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     cases.each do |query, code, parameter|
       aggregate_failures(query) do
         expect_query_error(query, code: code, parameter: parameter)
+      end
+    end
+  end
+
+  it "maps array and hash container conflicts in both orders for every query family" do
+    cases = [
+      [ "filter[]=10&filter[score]=20", "INVALID_FILTER", "filter[score]" ],
+      [ "filter[score]=20&filter[]=10", "INVALID_FILTER", "filter[]" ],
+      [ "page[]=1&page[number]=2", "INVALID_PAGE", "page[number]" ],
+      [ "page[number]=2&page[]=1", "INVALID_PAGE", "page[]" ],
+      [ "sort[]=score&sort[field]=title", "INVALID_SORT", "sort[field]" ],
+      [ "sort[field]=title&sort[]=score", "INVALID_SORT", "sort[]" ],
+      [ "include[]=category&include[path]=tags", "INVALID_INCLUDE", "include[path]" ],
+      [ "include[path]=tags&include[]=category", "INVALID_INCLUDE", "include[]" ]
+    ]
+
+    aggregate_failures "container conflicts" do
+      cases.each do |query, code, parameter|
+        expect_query_error(query, code: code, parameter: parameter)
+      end
+    end
+  end
+
+  it "negotiates Accept before array and hash container conflicts for every query family" do
+    queries = [
+      "filter[]=10&filter[score]=20",
+      "page[number]=2&page[]=1",
+      "sort[]=score&sort[field]=title",
+      "include[path]=tags&include[]=category"
+    ]
+
+    aggregate_failures "container conflict negotiation" do
+      queries.each do |query|
+        get "#{PROBE_PATH}?#{query}", headers: { "ACCEPT" => "application/json" }
+
+        expect_jsonapi_error(status: 406, code: "NOT_ACCEPTABLE", parameter: "Accept")
       end
     end
   end
