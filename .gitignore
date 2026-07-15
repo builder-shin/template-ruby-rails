@@ -35,9 +35,6 @@
 # Ignore master key for decrypting credentials and more.
 /config/master.key
 
-# Ignore uploaded Swagger files
-/swagger/v1/swagger.yaml
-
 # Vendor
 /vendor/bundle/
 

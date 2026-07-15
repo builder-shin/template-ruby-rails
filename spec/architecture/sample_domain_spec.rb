@@ -4,6 +4,10 @@ require "rails_helper"
 require "open3"
 
 RSpec.describe "Sample domain architecture" do
+  def read_project_file(path)
+    Rails.root.join(path).read
+  end
+
   def tracked_source_files
     stdout, status = Open3.capture2(
       "git", "ls-files", "-z", "--", "app/**/*.rb", "config/**/*.rb", "Gemfile", "Gemfile.lock", ".env.example",
@@ -42,5 +46,26 @@ RSpec.describe "Sample domain architecture" do
     contents = tracked_source.values.join("\n")
 
     expect(contents).to include("AuthServiceClient", "Sidekiq", "ActiveStorage")
+  end
+
+  it "documents the executable Example API development contract" do
+    readme = read_project_file("README.md")
+
+    expect(readme).to include(
+      "docker compose up --build",
+      "session_web=dev-session",
+      "Accept: application/vnd.api+json",
+      "Content-Type: application/vnd.api+json",
+      "curl --globoff",
+      "/api/v1/examples",
+      "/relationships/category",
+      "/relationships/tags",
+      "bin/rails db:reset",
+      "SimpleCov 80%",
+      "bundle exec rspec",
+      "bundle exec rubocop",
+      "bundle exec brakeman --no-pager -q"
+    )
+    expect(readme).to match(/Auth stub.*development.*production.*AUTH_SERVICE_URL/im)
   end
 end

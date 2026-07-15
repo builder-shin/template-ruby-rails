@@ -1,108 +1,381 @@
 # frozen_string_literal: true
 
-require 'rails_helper'
+require "rails_helper"
 
 RSpec.configure do |config|
   config.include FactoryBot::Syntax::Methods
 
-  config.openapi_root = Rails.root.join('swagger').to_s
+  config.openapi_root = Rails.root.join("swagger").to_s
+
+  identifier_schema = lambda do |type|
+    {
+      type: "object",
+      required: %w[type id],
+      properties: {
+        type: { type: "string", enum: [ type ] },
+        id: { type: "string", format: "uuid" }
+      }
+    }
+  end
+  document_response = lambda do |schema|
+    {
+      description: "JSON:API document",
+      content: {
+        "application/vnd.api+json" => {
+          schema: { "$ref" => "#/components/schemas/#{schema}" }
+        }
+      }
+    }
+  end
+  request_body = lambda do |schema|
+    {
+      required: true,
+      content: {
+        "application/vnd.api+json" => {
+          schema: { "$ref" => "#/components/schemas/#{schema}" }
+        }
+      }
+    }
+  end
+  operation = lambda do |summary, response_schema = nil, status: "200", protected: false, request_schema: nil|
+    response = response_schema ? document_response.call(response_schema) : { description: "No Content" }
+    definition = { summary: summary, responses: { status => response } }
+    definition[:security] = [ { cookieAuth: [] } ] if protected
+    definition[:requestBody] = request_body.call(request_schema) if request_schema
+    definition
+  end
+  id_parameter = {
+    name: "id",
+    in: "path",
+    required: true,
+    schema: { type: "string", format: "uuid" }
+  }
+  upsert_operation = operation.call(
+    "Example 생성 또는 전체 교체",
+    "ExampleDocument",
+    protected: true,
+    request_schema: "ExampleUpdateDocument"
+  )
+  upsert_operation[:responses]["201"] = document_response.call("ExampleDocument")
 
   config.openapi_specs = {
-    'v1/swagger.yaml' => {
-      openapi: '3.0.1',
+    "v1/swagger.yaml" => {
+      openapi: "3.0.1",
       info: {
-        title: 'API Document',
-        version: 'v1'
+        title: "Template Ruby Rails Example API",
+        version: "v1"
       },
-      paths: {},
-      servers: [
-        {
-          url: 'https://{defaultHost}',
-          variables: {
-            defaultHost: {
-              default: 'localhost'
+      servers: [ { url: "http://localhost:4000" } ],
+      paths: {
+        "/api/v1/examples" => {
+          get: operation.call("Example 목록 조회", "ExampleCollectionDocument"),
+          post: operation.call(
+            "Example 생성",
+            "ExampleDocument",
+            status: "201",
+            protected: true,
+            request_schema: "ExampleCreateDocument"
+          )
+        },
+        "/api/v1/examples/{id}" => {
+          parameters: [ id_parameter ],
+          get: operation.call("Example 조회", "ExampleDocument"),
+          patch: operation.call(
+            "Example 일부 수정",
+            "ExampleDocument",
+            protected: true,
+            request_schema: "ExampleUpdateDocument"
+          ),
+          put: upsert_operation,
+          delete: operation.call("Example 삭제", status: "204", protected: true)
+        },
+        "/api/v1/examples/{id}/relationships/category" => {
+          parameters: [ id_parameter ],
+          get: operation.call("Category linkage 조회", "CategoryRelationshipDocument"),
+          patch: operation.call(
+            "Category 관계 교체",
+            status: "204",
+            protected: true,
+            request_schema: "CategoryRelationshipDocument"
+          )
+        },
+        "/api/v1/examples/{id}/category" => {
+          parameters: [ id_parameter ],
+          get: operation.call("Category related resource 조회", "CategoryDocument")
+        },
+        "/api/v1/examples/{id}/relationships/tags" => {
+          parameters: [ id_parameter ],
+          get: operation.call("Tag linkage 조회", "TagsRelationshipDocument"),
+          post: operation.call(
+            "Tag 관계 추가",
+            status: "204",
+            protected: true,
+            request_schema: "TagsRelationshipDocument"
+          ),
+          patch: operation.call(
+            "Tag 관계 교체",
+            status: "204",
+            protected: true,
+            request_schema: "TagsRelationshipDocument"
+          ),
+          delete: operation.call(
+            "Tag 관계 제거",
+            status: "204",
+            protected: true,
+            request_schema: "TagsRelationshipDocument"
+          )
+        },
+        "/api/v1/examples/{id}/tags" => {
+          parameters: [ id_parameter ],
+          get: operation.call("Tag related resources 조회", "TagCollectionDocument")
+        }
+      },
+      components: {
+        securitySchemes: {
+          cookieAuth: { type: "apiKey", in: "cookie", name: "session_web" }
+        },
+        schemas: {
+          ExampleIdentifier: identifier_schema.call("examples"),
+          ExampleCategoryIdentifier: identifier_schema.call("exampleCategories"),
+          ExampleTagIdentifier: identifier_schema.call("exampleTags"),
+          ExampleAttributes: {
+            type: "object",
+            required: %w[title description status score createdAt updatedAt],
+            properties: {
+              title: { type: "string", maxLength: 200 },
+              description: { type: "string", nullable: true },
+              status: { type: "string", enum: %w[draft active archived] },
+              score: { type: "integer", minimum: 0, maximum: 100 },
+              createdAt: { type: "string", format: "date-time", readOnly: true },
+              updatedAt: { type: "string", format: "date-time", readOnly: true }
+            }
+          },
+          ExampleWriteAttributes: {
+            type: "object",
+            properties: {
+              title: { type: "string", maxLength: 200 },
+              description: { type: "string", nullable: true },
+              status: { type: "string", enum: %w[draft active archived] },
+              score: { type: "integer", minimum: 0, maximum: 100 }
+            }
+          },
+          ExampleCategoryResource: {
+            allOf: [
+              { "$ref" => "#/components/schemas/ExampleCategoryIdentifier" },
+              {
+                type: "object",
+                required: [ "attributes" ],
+                properties: {
+                  attributes: {
+                    type: "object",
+                    required: [ "name" ],
+                    properties: { name: { type: "string" } }
+                  }
+                }
+              }
+            ]
+          },
+          ExampleTagResource: {
+            allOf: [
+              { "$ref" => "#/components/schemas/ExampleTagIdentifier" },
+              {
+                type: "object",
+                required: [ "attributes" ],
+                properties: {
+                  attributes: {
+                    type: "object",
+                    required: [ "name" ],
+                    properties: { name: { type: "string" } }
+                  }
+                }
+              }
+            ]
+          },
+          ExampleRelationships: {
+            type: "object",
+            required: %w[category tags],
+            properties: {
+              category: {
+                type: "object",
+                required: %w[data links],
+                properties: {
+                  data: {
+                    allOf: [ { "$ref" => "#/components/schemas/ExampleCategoryIdentifier" } ],
+                    nullable: true
+                  },
+                  links: { type: "object" }
+                }
+              },
+              tags: {
+                type: "object",
+                required: %w[data links],
+                properties: {
+                  data: {
+                    type: "array",
+                    items: { "$ref" => "#/components/schemas/ExampleTagIdentifier" }
+                  },
+                  links: { type: "object" }
+                }
+              }
+            }
+          },
+          ExampleWriteRelationships: {
+            type: "object",
+            properties: {
+              category: {
+                type: "object",
+                required: [ "data" ],
+                properties: {
+                  data: {
+                    allOf: [ { "$ref" => "#/components/schemas/ExampleCategoryIdentifier" } ],
+                    nullable: true
+                  }
+                }
+              },
+              tags: {
+                type: "object",
+                required: [ "data" ],
+                properties: {
+                  data: {
+                    type: "array",
+                    items: { "$ref" => "#/components/schemas/ExampleTagIdentifier" }
+                  }
+                }
+              }
+            }
+          },
+          ExampleResource: {
+            allOf: [
+              { "$ref" => "#/components/schemas/ExampleIdentifier" },
+              {
+                type: "object",
+                required: %w[attributes relationships links],
+                properties: {
+                  attributes: { "$ref" => "#/components/schemas/ExampleAttributes" },
+                  relationships: { "$ref" => "#/components/schemas/ExampleRelationships" },
+                  links: { type: "object" }
+                }
+              }
+            ]
+          },
+          ExampleCreateDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                type: "object",
+                required: %w[type attributes],
+                properties: {
+                  type: { type: "string", enum: [ "examples" ] },
+                  attributes: { "$ref" => "#/components/schemas/ExampleWriteAttributes" },
+                  relationships: { "$ref" => "#/components/schemas/ExampleWriteRelationships" }
+                }
+              }
+            }
+          },
+          ExampleUpdateDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                type: "object",
+                required: %w[type id],
+                properties: {
+                  type: { type: "string", enum: [ "examples" ] },
+                  id: { type: "string", format: "uuid" },
+                  attributes: { "$ref" => "#/components/schemas/ExampleWriteAttributes" },
+                  relationships: { "$ref" => "#/components/schemas/ExampleWriteRelationships" }
+                }
+              }
+            }
+          },
+          ExampleDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: { "$ref" => "#/components/schemas/ExampleResource" },
+              included: {
+                type: "array",
+                items: {
+                  oneOf: [
+                    { "$ref" => "#/components/schemas/ExampleCategoryResource" },
+                    { "$ref" => "#/components/schemas/ExampleTagResource" }
+                  ]
+                }
+              }
+            }
+          },
+          ExampleCollectionDocument: {
+            type: "object",
+            required: %w[data meta links],
+            properties: {
+              data: {
+                type: "array",
+                items: { "$ref" => "#/components/schemas/ExampleResource" }
+              },
+              included: {
+                type: "array",
+                items: {
+                  oneOf: [
+                    { "$ref" => "#/components/schemas/ExampleCategoryResource" },
+                    { "$ref" => "#/components/schemas/ExampleTagResource" }
+                  ]
+                }
+              },
+              meta: {
+                type: "object",
+                required: [ "totalCount" ],
+                properties: { totalCount: { type: "integer", minimum: 0 } }
+              },
+              links: { type: "object" }
+            }
+          },
+          CategoryRelationshipDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                allOf: [ { "$ref" => "#/components/schemas/ExampleCategoryIdentifier" } ],
+                nullable: true
+              },
+              links: { type: "object" }
+            }
+          },
+          TagsRelationshipDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                type: "array",
+                items: { "$ref" => "#/components/schemas/ExampleTagIdentifier" }
+              },
+              links: { type: "object" }
+            }
+          },
+          CategoryDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                allOf: [ { "$ref" => "#/components/schemas/ExampleCategoryResource" } ],
+                nullable: true
+              }
+            }
+          },
+          TagCollectionDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                type: "array",
+                items: { "$ref" => "#/components/schemas/ExampleTagResource" }
+              }
             }
           }
         }
-      ]
+      }
     }
   }
 
   config.openapi_format = :yaml
-
-  def jsonapi_schema(schema)
-    {
-      type: 'object',
-      properties: {
-        data: {
-          type: 'object',
-          properties: {
-            type: { type: 'string' },
-            id: { type: 'string' },
-            attributes: schema
-          }
-        }
-      }
-    }
-  end
-
-  def jsonapi_body(data)
-    {
-      data: {
-        attributes: data
-      }
-    }
-  end
-
-  config.after do |example|
-    example.metadata[:response][:code] += "{division}#{example.metadata[:full_description]}"
-    content = example.metadata[:response][:content] || {}
-    example_spec = {
-      "application/json"=>{
-        examples: {
-          response: {
-            value: JSON.parse(response.body, symbolize_names: true)
-          }
-        }
-      }
-    }
-    example.metadata[:response][:content] = content.deep_merge(example_spec)
-    # generate_response_schema(example, response) if respond_to?(:response)
-  end
-
-  def expect_response_to_raise_error(response, error)
-    expect(JSON.parse(response.body)['errors'][0]['title']).to eq(error)
-  end
-end
-
-private
-
-def generate_response_schema(example, response)
-  return if example.metadata[:response].blank?
-
-  content = example.metadata[:response][:content] || {}
-  parsed_body = parse_response_body(response)
-  example_spec = create_example_spec(example, parsed_body)
-
-  example.metadata[:response][:content] = content.deep_merge(example_spec)
-end
-
-def parse_response_body(response)
-  return nil if response.blank?
-
-  JSON.parse(response.body, symbolize_names: true)
-rescue JSON::ParserError
-  nil
-end
-
-def create_example_spec(example, parsed_body)
-  {
-    'application/json' => {
-      examples: {
-        example.metadata => {
-          value: parsed_body
-        }
-      }
-    }
-  }
 end

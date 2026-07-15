@@ -45,6 +45,7 @@ services:
       AUTH_SERVICE_URL: http://auth-stub:8080
       ACTIVE_STORAGE_SERVICE: local
       ACTIVE_JOB_QUEUE_ADAPTER: sidekiq
+      SKIP_TEST_DATABASE: "1"
       PORT: "4000"
     depends_on:
       db:

@@ -350,10 +350,6 @@ GEM
       rspec-mocks (~> 3.13)
       rspec-support (~> 3.13)
     rspec-support (3.13.1)
-    rswag (2.17.0)
-      rswag-api (= 2.17.0)
-      rswag-specs (= 2.17.0)
-      rswag-ui (= 2.17.0)
     rswag-api (2.17.0)
       activesupport (>= 5.2, < 8.2)
       railties (>= 5.2, < 8.2)
@@ -513,7 +509,9 @@ DEPENDENCIES
   rails-i18n
   ransack
   rspec-rails
-  rswag
+  rswag-api
+  rswag-specs
+  rswag-ui
   rubocop-rails-omakase
   ruby-lsp-rails
   rubyzip

@@ -73,8 +73,9 @@ gem "kaminari"
 gem "rack-cors"
 # Rate Limiting을 위한 Gem
 gem "rack-attack"
-# Swagger를 위한 Gem
-gem "rswag"
+# Swagger 문서 제공을 위한 Gem
+gem "rswag-api"
+gem "rswag-ui"
 # 백그라운드 작업을 위한 Gem
 gem "sidekiq", ">= 7.3.3"
 gem "sidekiq-cron", "~> 2.0"
@@ -97,6 +98,8 @@ gem "lograge"
 
 # 개발 / 테스트 환경 Gem
 group :development, :test do
+  # Swagger 문서 생성을 위한 Gem
+  gem "rswag-specs"
   # 테스트를 위한 Gem
   gem "rspec-rails"
   # 테스트 데이터를 만들기 위한 Gem

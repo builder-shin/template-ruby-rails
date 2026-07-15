@@ -1,0 +1,533 @@
+---
+openapi: 3.0.1
+info:
+  title: Template Ruby Rails Example API
+  version: v1
+servers:
+- url: http://localhost:4000
+paths:
+  "/api/v1/examples":
+    get:
+      summary: Example 목록 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleCollectionDocument"
+    post:
+      summary: Example 생성
+      responses:
+        '201':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleDocument"
+      security:
+      - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/ExampleCreateDocument"
+  "/api/v1/examples/{id}":
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: Example 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleDocument"
+    patch:
+      summary: Example 일부 수정
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleDocument"
+      security:
+      - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/ExampleUpdateDocument"
+    put:
+      summary: Example 생성 또는 전체 교체
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleDocument"
+        '201':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleDocument"
+      security:
+      - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/ExampleUpdateDocument"
+    delete:
+      summary: Example 삭제
+      responses:
+        '204':
+          description: No Content
+      security:
+      - cookieAuth: []
+  "/api/v1/examples/{id}/relationships/category":
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: Category linkage 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/CategoryRelationshipDocument"
+    patch:
+      summary: Category 관계 교체
+      responses:
+        '204':
+          description: No Content
+      security:
+      - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/CategoryRelationshipDocument"
+  "/api/v1/examples/{id}/category":
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: Category related resource 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/CategoryDocument"
+  "/api/v1/examples/{id}/relationships/tags":
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: Tag linkage 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/TagsRelationshipDocument"
+    post:
+      summary: Tag 관계 추가
+      responses:
+        '204':
+          description: No Content
+      security:
+      - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/TagsRelationshipDocument"
+    patch:
+      summary: Tag 관계 교체
+      responses:
+        '204':
+          description: No Content
+      security:
+      - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/TagsRelationshipDocument"
+    delete:
+      summary: Tag 관계 제거
+      responses:
+        '204':
+          description: No Content
+      security:
+      - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/TagsRelationshipDocument"
+  "/api/v1/examples/{id}/tags":
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: Tag related resources 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/TagCollectionDocument"
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session_web
+  schemas:
+    ExampleIdentifier:
+      type: object
+      required:
+      - type
+      - id
+      properties:
+        type:
+          type: string
+          enum:
+          - examples
+        id:
+          type: string
+          format: uuid
+    ExampleCategoryIdentifier:
+      type: object
+      required:
+      - type
+      - id
+      properties:
+        type:
+          type: string
+          enum:
+          - exampleCategories
+        id:
+          type: string
+          format: uuid
+    ExampleTagIdentifier:
+      type: object
+      required:
+      - type
+      - id
+      properties:
+        type:
+          type: string
+          enum:
+          - exampleTags
+        id:
+          type: string
+          format: uuid
+    ExampleAttributes:
+      type: object
+      required:
+      - title
+      - description
+      - status
+      - score
+      - createdAt
+      - updatedAt
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - archived
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+    ExampleWriteAttributes:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+          - draft
+          - active
+          - archived
+        score:
+          type: integer
+          minimum: 0
+          maximum: 100
+    ExampleCategoryResource:
+      allOf:
+      - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
+      - type: object
+        required:
+        - attributes
+        properties:
+          attributes:
+            type: object
+            required:
+            - name
+            properties:
+              name:
+                type: string
+    ExampleTagResource:
+      allOf:
+      - "$ref": "#/components/schemas/ExampleTagIdentifier"
+      - type: object
+        required:
+        - attributes
+        properties:
+          attributes:
+            type: object
+            required:
+            - name
+            properties:
+              name:
+                type: string
+    ExampleRelationships:
+      type: object
+      required:
+      - category
+      - tags
+      properties:
+        category:
+          type: object
+          required:
+          - data
+          - links
+          properties:
+            data:
+              allOf:
+              - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
+              nullable: true
+            links:
+              type: object
+        tags:
+          type: object
+          required:
+          - data
+          - links
+          properties:
+            data:
+              type: array
+              items:
+                "$ref": "#/components/schemas/ExampleTagIdentifier"
+            links:
+              type: object
+    ExampleWriteRelationships:
+      type: object
+      properties:
+        category:
+          type: object
+          required:
+          - data
+          properties:
+            data:
+              allOf:
+              - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
+              nullable: true
+        tags:
+          type: object
+          required:
+          - data
+          properties:
+            data:
+              type: array
+              items:
+                "$ref": "#/components/schemas/ExampleTagIdentifier"
+    ExampleResource:
+      allOf:
+      - "$ref": "#/components/schemas/ExampleIdentifier"
+      - type: object
+        required:
+        - attributes
+        - relationships
+        - links
+        properties:
+          attributes:
+            "$ref": "#/components/schemas/ExampleAttributes"
+          relationships:
+            "$ref": "#/components/schemas/ExampleRelationships"
+          links:
+            type: object
+    ExampleCreateDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          type: object
+          required:
+          - type
+          - attributes
+          properties:
+            type:
+              type: string
+              enum:
+              - examples
+            attributes:
+              "$ref": "#/components/schemas/ExampleWriteAttributes"
+            relationships:
+              "$ref": "#/components/schemas/ExampleWriteRelationships"
+    ExampleUpdateDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          type: object
+          required:
+          - type
+          - id
+          properties:
+            type:
+              type: string
+              enum:
+              - examples
+            id:
+              type: string
+              format: uuid
+            attributes:
+              "$ref": "#/components/schemas/ExampleWriteAttributes"
+            relationships:
+              "$ref": "#/components/schemas/ExampleWriteRelationships"
+    ExampleDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          "$ref": "#/components/schemas/ExampleResource"
+        included:
+          type: array
+          items:
+            oneOf:
+            - "$ref": "#/components/schemas/ExampleCategoryResource"
+            - "$ref": "#/components/schemas/ExampleTagResource"
+    ExampleCollectionDocument:
+      type: object
+      required:
+      - data
+      - meta
+      - links
+      properties:
+        data:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ExampleResource"
+        included:
+          type: array
+          items:
+            oneOf:
+            - "$ref": "#/components/schemas/ExampleCategoryResource"
+            - "$ref": "#/components/schemas/ExampleTagResource"
+        meta:
+          type: object
+          required:
+          - totalCount
+          properties:
+            totalCount:
+              type: integer
+              minimum: 0
+        links:
+          type: object
+    CategoryRelationshipDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          allOf:
+          - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
+          nullable: true
+        links:
+          type: object
+    TagsRelationshipDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ExampleTagIdentifier"
+        links:
+          type: object
+    CategoryDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          allOf:
+          - "$ref": "#/components/schemas/ExampleCategoryResource"
+          nullable: true
+    TagCollectionDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ExampleTagResource"

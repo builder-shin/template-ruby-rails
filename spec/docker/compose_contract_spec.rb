@@ -57,6 +57,7 @@ RSpec.describe "Development container contract" do
         "DEV_DATABASE_NAME" => "template_development",
         "AUTH_SERVICE_URL" => "http://auth-stub:8080",
         "ACTIVE_JOB_QUEUE_ADAPTER" => "sidekiq",
+        "SKIP_TEST_DATABASE" => "1",
         "PORT" => "4000"
       )
     end

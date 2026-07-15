@@ -37,6 +37,10 @@ jobs:
         run: bin/rails db:create db:schema:load
       - name: Run RSpec
         run: bundle exec rspec
+      - name: Generate Swagger document
+        run: COVERAGE_MINIMUM=0 bundle exec rails rswag:specs:swaggerize
+      - name: Verify Swagger document is current
+        run: git diff --exit-code -- swagger/v1/swagger.yaml
 
   lint:
     runs-on: ubuntu-latest
@@ -49,3 +53,18 @@ jobs:
         run: bundle exec brakeman --no-pager -q
       - name: RuboCop (style)
         run: bundle exec rubocop -f github
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+      - name: Build production image
+        run: docker build -t template-ruby-rails:production .
+      - name: Verify production image contents
+        run: |
+          docker run --rm --entrypoint sh template-ruby-rails:production -c 'test -f /app/swagger/v1/swagger.yaml'
+          ! docker run --rm --entrypoint bundle template-ruby-rails:production show rswag-specs
+          ! docker run --rm --entrypoint bundle template-ruby-rails:production show rspec-core
+          ! docker run --rm --entrypoint bundle template-ruby-rails:production show rspec-support
