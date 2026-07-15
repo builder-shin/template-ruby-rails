@@ -31,13 +31,10 @@ Rails.application.configure do
     config.cache_store = :null_store
   end
 
-  # Store uploaded files on S3 (see config/storage.yml for options).
-  # 로컬 개발에서도 S3 사용: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_BUCKET 환경변수 필요
-  config.active_storage.service = :amazon
+  # Store uploaded files using the configured development service.
+  config.active_storage.service = ENV.fetch("ACTIVE_STORAGE_SERVICE", "local").to_sym
 
-  # Redis 없이 개발하기 위해 inline queue adapter 사용
-  # (Sidekiq 없이 Active Storage AnalyzeJob 등이 동기 실행됨)
-  config.active_job.queue_adapter = :inline
+  config.active_job.queue_adapter = ENV.fetch("ACTIVE_JOB_QUEUE_ADAPTER", "sidekiq").to_sym
 
   # Don't care if the mailer can't send.
   config.action_mailer.raise_delivery_errors = false
@@ -46,7 +43,7 @@ Rails.application.configure do
   # caching is enabled.
   config.action_mailer.perform_caching = false
 
-  config.action_mailer.default_url_options = { host: "localhost", port: 3000 }
+  config.action_mailer.default_url_options = { host: "localhost", port: ENV.fetch("PORT", 4000) }
 
   # Print deprecation notices to the Rails logger.
   config.active_support.deprecation = :log
@@ -91,6 +88,6 @@ Rails.application.configure do
 
   # Enable DNS rebinding protection and other `Host` header attacks.
   config.hosts = [
-    "localhost:4000"
+    "localhost:#{ENV.fetch("PORT", 4000)}"
   ]
 end

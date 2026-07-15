@@ -1,0 +1,85 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: template_development
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d template_development"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth-stub:
+    image: wiremock/wiremock:3.13.1
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/wiremock:/home/wiremock:ro
+
+  migrate:
+    build:
+      context: .
+      target: development
+    command: bin/rails db:prepare
+    environment: &rails-environment
+      RAILS_ENV: development
+      DATABASE_HOST: db
+      DATABASE_PORT: "5432"
+      DEV_DATABASE_USERNAME: postgres
+      DEV_DATABASE_PASSWORD: postgres
+      DEV_DATABASE_NAME: template_development
+      AUTH_SERVICE_URL: http://auth-stub:8080
+      ACTIVE_STORAGE_SERVICE: local
+      ACTIVE_JOB_QUEUE_ADAPTER: sidekiq
+      PORT: "4000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      target: development
+    command: bundle exec puma -C config/puma.rb
+    environment:
+      <<: *rails-environment
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "4000:4000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      auth-stub:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      target: development
+    command: bundle exec sidekiq
+    environment:
+      <<: *rails-environment
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -2,8 +2,8 @@ Rails.application.routes.draw do
   mount Rswag::Ui::Engine => "/api-docs"
   mount Rswag::Api::Engine => "/api-docs"
 
-  get "/health/live", to: proc { [ 200, {}, [ "OK" ] ] }
-  get "/health/ready", to: proc { [ 200, {}, [ "OK" ] ] }
+  get "/health/live", to: "health#live"
+  get "/health/ready", to: "health#ready"
 
   namespace :api do
     namespace :v1 do

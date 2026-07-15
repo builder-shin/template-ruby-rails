@@ -1,0 +1,30 @@
+{
+  "priority": 1,
+  "request": {
+    "method": "GET",
+    "urlPath": "/api/auth/me",
+    "headers": {
+      "Cookie": {
+        "equalTo": "session_web=dev-session"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "success": true,
+      "data": {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "email": "dev@example.com",
+        "name": "Development User",
+        "workspace_id": "00000000-0000-4000-8000-000000000002",
+        "workspace_kind": "personal",
+        "workspace_role": "owner",
+        "member_status": "active"
+      }
+    }
+  }
+}
