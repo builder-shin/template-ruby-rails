@@ -17,7 +17,7 @@ RSpec.describe "SimpleCov configuration" do
     start_block = start_blocks.first
     direct_calls = direct_block_statements(start_block).filter_map { |statement| base_call(statement) }
     allowed_calls = [ base_call(start_block), *direct_calls.select { |call| direct_mutator?(call) } ]
-    return [] unless mutation_calls(syntax_tree).all? do |mutation|
+    return [] unless mutation_calls(syntax_tree, start_block:).all? do |mutation|
       allowed_calls.any? { |allowed| allowed.equal?(mutation) }
     end
 
@@ -77,13 +77,18 @@ RSpec.describe "SimpleCov configuration" do
     %w[ track_files minimum_coverage add_filter ].include?(call_name(call))
   end
 
-  def mutation_calls(node)
+  def mutation_calls(node, start_block:, inside_start_block: false)
     return [] unless node.is_a?(Array)
 
-    children = node.filter { |child| child.is_a?(Array) }.flat_map { |child| mutation_calls(child) }
+    inside_start_block ||= node.equal?(start_block)
+    children = node.filter { |child| child.is_a?(Array) }.flat_map do |child|
+      mutation_calls(child, start_block:, inside_start_block:)
+    end
     call = base_call(node)
+    dsl_filters = inside_start_block && call&.first == :vcall && call_name(call) == "filters"
     is_mutation = call.equal?(node) &&
-      (direct_mutator?(call) || %w[ start configure filters ].any? { |name| simplecov_call?(call, name) })
+      (direct_mutator?(call) || dsl_filters ||
+       %w[ start configure filters ].any? { |name| simplecov_call?(call, name) })
     is_mutation ? [ call, *children ] : children
   end
 
@@ -176,6 +181,12 @@ RSpec.describe "SimpleCov configuration" do
     )
   end
 
+  it "ignores receiverless filters access outside the approved start block" do
+    source = valid_source(after: [ "filters.clear", 'filters << "app/generated/"' ])
+
+    expect(call_declarations(source, "track_files")).to eq([ 'track_files "app/**/*.rb"' ])
+  end
+
   it "rejects every mutation outside the approved direct nodes" do
     sources = {
       "configure block" => valid_source(after: [ 'SimpleCov.configure { add_filter "configured/" }' ]),
@@ -195,6 +206,8 @@ RSpec.describe "SimpleCov configuration" do
       "top-level Object path blockless start" => valid_source(after: [ '::Object::SimpleCov.start "rails"' ]),
       "cleared filter collection" => valid_source(after: [ "SimpleCov.filters.clear" ]),
       "appended filter collection" => valid_source(after: [ 'SimpleCov.filters << "app/generated/"' ]),
+      "cleared DSL filter collection" => valid_source(inside: [ "filters.clear" ]),
+      "appended DSL filter collection" => valid_source(inside: [ 'filters << "app/generated/"' ]),
       "parenthesized nested start" => valid_source(inside: [ '(SimpleCov).start "rails" do', "end" ])
     }
 
