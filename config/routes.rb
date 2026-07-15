@@ -7,6 +7,10 @@ Rails.application.routes.draw do
 
   namespace :api do
     namespace :v1 do
+      resources :examples, only: %i[index show create destroy]
+      patch "examples/:id", to: "examples#update"
+      put "examples/:id", to: "examples#upsert"
+
       # Blog — example domain demonstrating CrudActions (filtering, pagination,
       # JSON:API includes, enums). Replace with your own resources.
       resources :blog_posts
