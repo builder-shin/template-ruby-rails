@@ -60,6 +60,11 @@ RSpec.describe "SimpleCov configuration" do
     case receiver&.first
     when :var_ref, :top_const_ref
       receiver.dig(1, 0) == :@const && receiver.dig(1, 1) == "SimpleCov"
+    when :const_path_ref
+      namespace, name = receiver[1], receiver[2]
+      %i[ var_ref top_const_ref ].include?(namespace&.first) &&
+        namespace.dig(1, 0) == :@const && namespace.dig(1, 1) == "Object" &&
+        name&.first == :@const && name[1] == "SimpleCov"
     when :paren
       expressions = receiver[1]
       expressions.one? && simplecov_receiver?(expressions.first)
@@ -186,6 +191,8 @@ RSpec.describe "SimpleCov configuration" do
       "duplicate start" => valid_source(after: [ 'SimpleCov.start "rails" do', "end" ]),
       "blockless start" => valid_source(after: [ 'SimpleCov.start "rails"' ]),
       "top-level constant blockless start" => valid_source(after: [ '::SimpleCov.start "rails"' ]),
+      "Object path blockless start" => valid_source(after: [ 'Object::SimpleCov.start "rails"' ]),
+      "top-level Object path blockless start" => valid_source(after: [ '::Object::SimpleCov.start "rails"' ]),
       "parenthesized nested start" => valid_source(inside: [ '(SimpleCov).start "rails" do', "end" ])
     }
 
