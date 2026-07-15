@@ -23,12 +23,12 @@ module Api
       def create_after_init
         blog_post = BlogPost.find_by(id: @model.blog_post_id)
         return if blog_post&.author_id == user_info.id
-        raise JsonApiError.new("Forbidden", "자신의 블로그 포스트에만 카테고리를 추가할 수 있습니다.", 403)
+        raise ::JsonApiError.new(status: 403, code: "FORBIDDEN")
       end
 
       def verify_ownership!
         return if @model.blog_post&.author_id == user_info.id
-        raise JsonApiError.new("Forbidden", "자신의 블로그 포스트 카테고리만 수정할 수 있습니다.", 403)
+        raise ::JsonApiError.new(status: 403, code: "FORBIDDEN")
       end
     end
   end

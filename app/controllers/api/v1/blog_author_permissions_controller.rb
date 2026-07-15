@@ -30,7 +30,7 @@ module Api
 
       def verify_ownership!
         return if @model.author_id == user_info.id
-        raise JsonApiError.new("Forbidden", "자신의 권한 요청만 수정할 수 있습니다.", 403)
+        raise ::JsonApiError.new(status: 403, code: "FORBIDDEN")
       end
     end
   end
