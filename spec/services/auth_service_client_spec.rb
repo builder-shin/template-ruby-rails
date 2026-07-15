@@ -4,7 +4,7 @@ require "rails_helper"
 
 RSpec.describe AuthServiceClient do
   let(:client) { described_class.new }
-  let(:bearer_token) { "test_token_12345" }
+  let(:session_token) { "test_token_12345" }
 
   # Circuit breaker 는 클래스 레벨 상태를 공유하므로 예제 간 격리를 위해 리셋
   before { described_class.reset_circuit! }
@@ -28,7 +28,7 @@ RSpec.describe AuthServiceClient do
 
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
           .to_return(
             status: 200,
             body: success_response.to_json,
@@ -37,7 +37,7 @@ RSpec.describe AuthServiceClient do
       end
 
       it "AuthUser 객체를 반환한다" do
-        result = client.verify_session(bearer_token)
+        result = client.verify_session(session_token)
 
         expect(result).to be_a(AuthUser)
         expect(result.id).to eq("user-123")
@@ -50,7 +50,7 @@ RSpec.describe AuthServiceClient do
       end
 
       it "enterprise? 메서드가 true를 반환한다" do
-        result = client.verify_session(bearer_token)
+        result = client.verify_session(session_token)
         expect(result.enterprise?).to be true
         expect(result.personal?).to be false
       end
@@ -59,8 +59,8 @@ RSpec.describe AuthServiceClient do
         # 메모리 캐시 스토어로 임시 전환하여 캐싱 테스트
         allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
 
-        client.verify_session(bearer_token)
-        client.verify_session(bearer_token)
+        client.verify_session(session_token)
+        client.verify_session(session_token)
 
         expect(WebMock).to have_requested(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me").once
       end
@@ -69,12 +69,12 @@ RSpec.describe AuthServiceClient do
     context "인증 실패 시 (401)" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
           .to_return(status: 401, body: { error: "Unauthorized" }.to_json)
       end
 
       it "AuthenticationError를 발생시킨다" do
-        expect { client.verify_session(bearer_token) }
+        expect { client.verify_session(session_token) }
           .to raise_error(AuthServiceClient::AuthenticationError, "인증에 실패했습니다.")
       end
     end
@@ -82,12 +82,12 @@ RSpec.describe AuthServiceClient do
     context "서비스 오류 시 (500)" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
           .to_return(status: 500, body: { error: "Internal Server Error" }.to_json)
       end
 
       it "ServiceUnavailableError를 발생시킨다" do
-        expect { client.verify_session(bearer_token) }
+        expect { client.verify_session(session_token) }
           .to raise_error(AuthServiceClient::ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다.")
       end
     end
@@ -95,12 +95,12 @@ RSpec.describe AuthServiceClient do
     context "타임아웃 시" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
           .to_timeout
       end
 
       it "ServiceUnavailableError를 발생시킨다" do
-        expect { client.verify_session(bearer_token) }
+        expect { client.verify_session(session_token) }
           .to raise_error(AuthServiceClient::ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다.")
       end
     end
@@ -108,12 +108,12 @@ RSpec.describe AuthServiceClient do
     context "연결 실패 시" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
           .to_raise(Faraday::ConnectionFailed.new("Connection refused"))
       end
 
       it "ServiceUnavailableError를 발생시킨다" do
-        expect { client.verify_session(bearer_token) }
+        expect { client.verify_session(session_token) }
           .to raise_error(AuthServiceClient::ServiceUnavailableError, "인증 서비스에 연결할 수 없습니다.")
       end
     end
@@ -121,7 +121,7 @@ RSpec.describe AuthServiceClient do
     context "응답에 success가 false인 경우" do
       before do
         stub_request(:get, "#{Rails.application.config.x.auth_service.url}/api/auth/me")
-          .with(headers: { "Cookie" => "session_web=#{bearer_token}" })
+          .with(headers: { "Cookie" => "session_web=#{session_token}" })
           .to_return(
             status: 200,
             body: { "success" => false, "error" => "Invalid session" }.to_json,
@@ -130,8 +130,20 @@ RSpec.describe AuthServiceClient do
       end
 
       it "nil을 반환한다" do
-        result = client.verify_session(bearer_token)
+        result = client.verify_session(session_token)
         expect(result).to be_nil
+      end
+    end
+
+    context "회로가 열린 경우" do
+      before do
+        described_class::FAILURE_THRESHOLD.times { described_class.record_failure }
+      end
+
+      it "외부 호출 없이 CircuitOpenError를 발생시킨다" do
+        expect { client.verify_session(session_token) }
+          .to raise_error(AuthServiceClient::CircuitOpenError)
+        expect(WebMock).not_to have_requested(:get, /api\/auth\/me/)
       end
     end
   end

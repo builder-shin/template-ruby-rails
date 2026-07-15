@@ -9,6 +9,7 @@ RSpec.describe "Example relationship concurrency", type: :request do
   before do
     ActiveRecord::Base.connection_handler.clear_active_connections!
     DatabaseCleaner.clean_with(:truncation)
+    mock_authenticated_user
   end
 
   after do
@@ -43,7 +44,7 @@ RSpec.describe "Example relationship concurrency", type: :request do
           session = ActionDispatch::Integration::Session.new(Rails.application)
           backend_pids << connection.raw_connection.backend_pid
           barrier.wait
-          session.post(path, params: body, headers: jsonapi_headers)
+          session.post(path, params: body, headers: jsonapi_headers(cookie: "valid-session"))
           session.response.status
         end
       end

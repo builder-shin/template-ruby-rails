@@ -6,6 +6,8 @@ require "database_cleaner/active_record"
 RSpec.describe "Example atomic PUT upsert", type: :request do
   let(:collection_path) { "/api/v1/examples" }
 
+  before { mock_authenticated_user }
+
   def resource_path(id)
     "#{collection_path}/#{id}"
   end
@@ -19,7 +21,7 @@ RSpec.describe "Example atomic PUT upsert", type: :request do
   end
 
   def perform_put(id, body)
-    put resource_path(id), params: body.to_json, headers: jsonapi_headers
+    put resource_path(id), params: body.to_json, headers: jsonapi_headers(cookie: "valid-session")
   end
 
   it "creates a missing UUID with 201 and the requested id" do
@@ -194,7 +196,7 @@ RSpec.describe "Example atomic PUT upsert", type: :request do
             session.put(
               resource_path(resource_id),
               params: body.to_json,
-              headers: jsonapi_headers
+              headers: jsonapi_headers(cookie: "valid-session")
             )
             [ session.response.status, JSON.parse(session.response.body) ]
           end

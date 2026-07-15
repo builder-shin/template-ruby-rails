@@ -5,6 +5,8 @@ require "rails_helper"
 RSpec.describe "Example relationships", type: :request do
   let(:collection_path) { "/api/v1/examples" }
 
+  before { mock_authenticated_user }
+
   def relationship_path(example, name)
     "#{collection_path}/#{example.id}/relationships/#{name}"
   end
@@ -18,7 +20,12 @@ RSpec.describe "Example relationships", type: :request do
   end
 
   def mutate(method, path, data)
-    public_send(method, path, params: { data: data }.to_json, headers: jsonapi_headers)
+    public_send(
+      method,
+      path,
+      params: { data: data }.to_json,
+      headers: jsonapi_headers(cookie: "valid-session")
+    )
   end
 
   def expect_error(status, code, pointer: nil)

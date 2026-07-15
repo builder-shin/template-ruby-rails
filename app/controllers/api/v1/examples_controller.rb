@@ -6,6 +6,16 @@ module Api
       RESOURCE_UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
       private_constant :RESOURCE_UUID
 
+      before_action :require_active_user!, only: %i[
+        create
+        update
+        upsert
+        destroy
+        replace_category_relationship
+        add_tags_relationship
+        replace_tags_relationship
+        remove_tags_relationship
+      ]
       skip_before_action :_set_model, only: :update
 
       def allowed_includes

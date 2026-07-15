@@ -9,8 +9,17 @@ class ApiController < ApplicationController
     Current.user
   end
 
-  def user_check!
+  def require_authenticated_user!
     raise ::JsonApiError.new(status: 401, code: "AUTHENTICATION_REQUIRED") if user_info.nil?
+  end
+
+  def require_active_user!
+    require_authenticated_user!
+    raise ::JsonApiError.new(status: 403, code: "FORBIDDEN") unless user_info.active?
+  end
+
+  def user_check!
+    require_authenticated_user!
   end
 
   def enterprise_check!
@@ -26,7 +35,7 @@ class ApiController < ApplicationController
   private
 
   def set_current_user
-    token = extract_bearer_token
+    token = extract_session_token
     return unless token
 
     Current.user = auth_service.verify_session(token)
@@ -36,7 +45,7 @@ class ApiController < ApplicationController
     raise ::JsonApiError.new(status: 503, code: "AUTH_SERVICE_UNAVAILABLE")
   end
 
-  def extract_bearer_token
+  def extract_session_token
     request.cookies["session_web"]
   end
 
