@@ -83,7 +83,7 @@ RSpec.describe "SimpleCov configuration" do
     children = node.filter { |child| child.is_a?(Array) }.flat_map { |child| mutation_calls(child) }
     call = base_call(node)
     is_mutation = call.equal?(node) &&
-      (direct_mutator?(call) || %w[ start configure ].any? { |name| simplecov_call?(call, name) })
+      (direct_mutator?(call) || %w[ start configure filters ].any? { |name| simplecov_call?(call, name) })
     is_mutation ? [ call, *children ] : children
   end
 
@@ -193,6 +193,8 @@ RSpec.describe "SimpleCov configuration" do
       "top-level constant blockless start" => valid_source(after: [ '::SimpleCov.start "rails"' ]),
       "Object path blockless start" => valid_source(after: [ 'Object::SimpleCov.start "rails"' ]),
       "top-level Object path blockless start" => valid_source(after: [ '::Object::SimpleCov.start "rails"' ]),
+      "cleared filter collection" => valid_source(after: [ "SimpleCov.filters.clear" ]),
+      "appended filter collection" => valid_source(after: [ 'SimpleCov.filters << "app/generated/"' ]),
       "parenthesized nested start" => valid_source(inside: [ '(SimpleCov).start "rails" do', "end" ])
     }
 
