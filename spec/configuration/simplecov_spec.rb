@@ -11,46 +11,64 @@ RSpec.describe "SimpleCov configuration" do
     raise SyntaxError, "Invalid Ruby source" unless syntax_tree
 
     lines = source.lines
-    start_blocks = syntax_tree[1].select { |statement| simplecov_start_block?(statement) }
+    start_blocks = syntax_tree[1].select { |statement| approved_start_block?(statement, lines) }
     return [] unless start_blocks.one?
 
     start_block = start_blocks.first
-    start_token = direct_call_token(start_block[1])
-    return [] unless lines.fetch(start_token[2].first - 1).strip == 'SimpleCov.start "rails" do'
+    direct_calls = direct_block_statements(start_block).filter_map { |statement| base_call(statement) }
+    allowed_calls = [ base_call(start_block), *direct_calls.select { |call| direct_mutator?(call) } ]
+    return [] unless mutation_calls(syntax_tree).all? do |mutation|
+      allowed_calls.any? { |allowed| allowed.equal?(mutation) }
+    end
 
-    direct_block_statements(start_block).filter_map do |statement|
-      method_token = direct_call_token(statement)
-      lines.fetch(method_token[2].first - 1).strip if method_token&.first == :@ident && method_token[1] == method_name
+    direct_calls.filter_map do |call|
+      lines.fetch(call_token(call)[2].first - 1).strip if call_name(call) == method_name
     end
   end
 
-  def direct_call_token(node)
+  def base_call(node)
     case node&.first
-    when :command, :fcall, :vcall
-      node[1]
-    when :call, :command_call
-      node[3]
+    when :command, :fcall, :vcall, :call, :command_call
+      node
     when :method_add_arg, :method_add_block
-      direct_call_token(node[1])
+      base_call(node[1])
     end
   end
 
-  def direct_call_receiver(node)
-    case node&.first
-    when :call, :command_call
-      node[1]
-    when :method_add_arg, :method_add_block
-      direct_call_receiver(node[1])
-    end
+  def call_token(call)
+    %i[ command fcall vcall ].include?(call.first) ? call[1] : call[3]
   end
 
-  def simplecov_start_block?(node)
+  def call_name(call)
+    call_token(call)[1]
+  end
+
+  def approved_start_block?(node, lines)
     return false unless node&.first == :method_add_block
 
-    method_token = direct_call_token(node[1])
-    receiver = direct_call_receiver(node[1])
-    method_token&.first == :@ident && method_token[1] == "start" &&
-      receiver&.first == :var_ref && receiver.dig(1, 0) == :@const && receiver.dig(1, 1) == "SimpleCov"
+    call = base_call(node)
+    simplecov_call?(call, "start") &&
+      lines.fetch(call_token(call)[2].first - 1).strip == 'SimpleCov.start "rails" do'
+  end
+
+  def simplecov_call?(call, method_name)
+    receiver = call[1] if %i[ call command_call ].include?(call&.first)
+    call && call_name(call) == method_name && receiver&.first == :var_ref &&
+      receiver.dig(1, 0) == :@const && receiver.dig(1, 1) == "SimpleCov"
+  end
+
+  def direct_mutator?(call)
+    %w[ track_files minimum_coverage add_filter ].include?(call_name(call))
+  end
+
+  def mutation_calls(node)
+    return [] unless node.is_a?(Array)
+
+    children = node.filter { |child| child.is_a?(Array) }.flat_map { |child| mutation_calls(child) }
+    call = base_call(node)
+    is_mutation = call.equal?(node) &&
+      (direct_mutator?(call) || %w[ start configure ].any? { |name| simplecov_call?(call, name) })
+    is_mutation ? [ call, *children ] : children
   end
 
   def direct_block_statements(start_block)
@@ -59,6 +77,21 @@ RSpec.describe "SimpleCov configuration" do
     return [] unless block.first == :do_block && body&.first == :bodystmt
 
     body[1] || []
+  end
+
+  def valid_source(inside: [], after: [])
+    lines = [
+      'SimpleCov.start "rails" do',
+      '  track_files "app/**/*.rb"',
+      '  minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "80").to_f',
+      '  add_filter "app/channels/application_cable/"',
+      '  add_filter "app/helpers/application_helper.rb"',
+      '  add_filter "app/mailers/application_mailer.rb"',
+      *inside.map { |line| "  #{line}" },
+      "end",
+      *after
+    ]
+    "#{lines.join("\n")}\n"
   end
 
   it "uses the environment minimum with an 80 percent default" do
@@ -127,36 +160,26 @@ RSpec.describe "SimpleCov configuration" do
     )
   end
 
-  it "excludes declarations inside unreachable branches and method definitions" do
-    source = <<~RUBY
-      SimpleCov.start "rails" do
-        if false
-          minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "80").to_f
-          add_filter "app/channels/application_cable/"
-        end
+  it "rejects every mutation outside the approved direct nodes" do
+    sources = {
+      "configure block" => valid_source(after: [ 'SimpleCov.configure { add_filter "configured/" }' ]),
+      "module filter" => valid_source(after: [ 'SimpleCov.add_filter "module/"' ]),
+      "conditional filter" => valid_source(inside: [ "if false", '  add_filter "conditional/"', "end" ]),
+      "conditional minimum" => valid_source(
+        inside: [ "if false", '  minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "80").to_f', "end" ]
+      ),
+      "deferred track" => valid_source(inside: [ "def deferred", '  track_files "app/**/*.rb"', "end" ]),
+      "nested start" => valid_source(
+        inside: [ 'SimpleCov.start "rails" do', "end" ]
+      ),
+      "duplicate start" => valid_source(after: [ 'SimpleCov.start "rails" do', "end" ]),
+      "blockless start" => valid_source(after: [ 'SimpleCov.start "rails"' ])
+    }
 
-        def deferred_coverage
-          track_files "app/**/*.rb"
-          add_filter "app/helpers/application_helper.rb"
-        end
+    aggregate_failures do
+      sources.each do |label, source|
+        expect(call_declarations(source, "add_filter")).to be_empty, label
       end
-    RUBY
-
-    expect(call_declarations(source, "minimum_coverage")).to be_empty
-    expect(call_declarations(source, "track_files")).to be_empty
-    expect(call_declarations(source, "add_filter")).to be_empty
-  end
-
-  it "rejects duplicate rails profile blocks" do
-    source = <<~RUBY
-      SimpleCov.start "rails" do
-      end
-
-      SimpleCov.start "rails" do
-        track_files "app/**/*.rb"
-      end
-    RUBY
-
-    expect(call_declarations(source, "track_files")).to be_empty
+    end
   end
 end
