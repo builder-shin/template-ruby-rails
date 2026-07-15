@@ -1,0 +1,63 @@
+en:
+  jsonapi:
+    errors:
+      NOT_ACCEPTABLE:
+        title: "Not acceptable"
+        detail: "The requested response format is not supported."
+      UNSUPPORTED_MEDIA_TYPE:
+        title: "Unsupported media type"
+        detail: "The request body must use the JSON:API media type."
+      INVALID_JSONAPI_DOCUMENT:
+        title: "Invalid JSON:API document"
+        detail: "The request document does not conform to JSON:API."
+      INVALID_QUERY_PARAMETER:
+        title: "Invalid query parameter"
+        detail: "A query parameter is unsupported or invalid."
+      INVALID_FILTER:
+        title: "Invalid filter"
+        detail: "A filter is unsupported or invalid."
+      INVALID_SORT:
+        title: "Invalid sort"
+        detail: "A sort field is unsupported or invalid."
+      INVALID_INCLUDE:
+        title: "Invalid include path"
+        detail: "An include path is unsupported or invalid."
+      INVALID_PAGE:
+        title: "Invalid page"
+        detail: "A page parameter is outside the allowed range."
+      RESOURCE_NOT_FOUND:
+        title: "Resource not found"
+        detail: "The requested resource could not be found."
+      RELATIONSHIP_RESOURCE_NOT_FOUND:
+        title: "Relationship resource not found"
+        detail: "The requested relationship resource could not be found."
+      TYPE_MISMATCH:
+        title: "Resource type mismatch"
+        detail: "The resource type does not match the target type."
+      ID_MISMATCH:
+        title: "Resource ID mismatch"
+        detail: "The document resource ID does not match the request path."
+      CLIENT_GENERATED_ID_UNSUPPORTED:
+        title: "Client-generated ID unsupported"
+        detail: "This create endpoint does not support a client-generated resource ID."
+      RESOURCE_CONFLICT:
+        title: "Resource conflict"
+        detail: "The request conflicts with the current resource state."
+      VALIDATION_ERROR:
+        title: "Invalid request"
+        detail: "A request value failed validation."
+      INTERNAL_SERVER_ERROR:
+        title: "Internal server error"
+        detail: "The server encountered an error while processing the request."
+      HTTP_ERROR:
+        title: "HTTP request error"
+        detail: "The HTTP request could not be processed."
+      AUTHENTICATION_REQUIRED:
+        title: "Authentication required"
+        detail: "You must be signed in to access this resource."
+      FORBIDDEN:
+        title: "Forbidden"
+        detail: "You are not allowed to access this resource."
+      AUTH_SERVICE_UNAVAILABLE:
+        title: "Authentication service unavailable"
+        detail: "The authentication service is temporarily unavailable."

@@ -1,0 +1,63 @@
+ko:
+  jsonapi:
+    errors:
+      NOT_ACCEPTABLE:
+        title: "허용할 수 없는 응답 형식"
+        detail: "요청한 응답 형식을 지원하지 않습니다."
+      UNSUPPORTED_MEDIA_TYPE:
+        title: "지원하지 않는 미디어 타입"
+        detail: "요청 본문은 JSON:API 미디어 타입을 사용해야 합니다."
+      INVALID_JSONAPI_DOCUMENT:
+        title: "유효하지 않은 JSON:API 문서"
+        detail: "요청 문서가 JSON:API 형식에 맞지 않습니다."
+      INVALID_QUERY_PARAMETER:
+        title: "유효하지 않은 쿼리 매개변수"
+        detail: "지원하지 않거나 잘못된 쿼리 매개변수입니다."
+      INVALID_FILTER:
+        title: "유효하지 않은 필터"
+        detail: "지원하지 않거나 잘못된 필터입니다."
+      INVALID_SORT:
+        title: "유효하지 않은 정렬"
+        detail: "지원하지 않거나 잘못된 정렬 항목입니다."
+      INVALID_INCLUDE:
+        title: "유효하지 않은 포함 경로"
+        detail: "지원하지 않거나 잘못된 포함 경로입니다."
+      INVALID_PAGE:
+        title: "유효하지 않은 페이지"
+        detail: "페이지 매개변수가 허용 범위를 벗어났습니다."
+      RESOURCE_NOT_FOUND:
+        title: "리소스를 찾을 수 없음"
+        detail: "요청한 리소스를 찾을 수 없습니다."
+      RELATIONSHIP_RESOURCE_NOT_FOUND:
+        title: "관계 리소스를 찾을 수 없음"
+        detail: "요청한 관계 리소스를 찾을 수 없습니다."
+      TYPE_MISMATCH:
+        title: "리소스 타입 불일치"
+        detail: "요청한 리소스 타입이 대상 타입과 일치하지 않습니다."
+      ID_MISMATCH:
+        title: "리소스 ID 불일치"
+        detail: "문서의 리소스 ID가 요청 경로와 일치하지 않습니다."
+      CLIENT_GENERATED_ID_UNSUPPORTED:
+        title: "클라이언트 생성 ID 미지원"
+        detail: "이 생성 엔드포인트는 클라이언트가 지정한 리소스 ID를 지원하지 않습니다."
+      RESOURCE_CONFLICT:
+        title: "리소스 충돌"
+        detail: "현재 리소스 상태와 요청이 충돌합니다."
+      VALIDATION_ERROR:
+        title: "유효하지 않은 요청"
+        detail: "요청 값이 유효성 검사를 통과하지 못했습니다."
+      INTERNAL_SERVER_ERROR:
+        title: "서버 내부 오류"
+        detail: "요청을 처리하는 중 서버 오류가 발생했습니다."
+      HTTP_ERROR:
+        title: "HTTP 요청 오류"
+        detail: "HTTP 요청을 처리할 수 없습니다."
+      AUTHENTICATION_REQUIRED:
+        title: "인증 필요"
+        detail: "로그인 후 이용해 주세요."
+      FORBIDDEN:
+        title: "접근 금지"
+        detail: "이 리소스에 접근할 권한이 없습니다."
+      AUTH_SERVICE_UNAVAILABLE:
+        title: "인증 서비스 이용 불가"
+        detail: "인증 서비스를 일시적으로 이용할 수 없습니다."

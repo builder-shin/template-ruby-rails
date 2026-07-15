@@ -19,4 +19,6 @@ Rails.application.routes.draw do
       resources :email_templates
     end
   end
+
+  match "*unmatched", to: "application#route_not_found", via: :all
 end
