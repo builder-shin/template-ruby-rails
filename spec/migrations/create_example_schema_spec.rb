@@ -6,6 +6,19 @@ require "securerandom"
 RSpec.describe "CreateExampleSchema migration" do
   let(:migration_path) { Rails.root.join("db/migrate/20260201000000_create_example_schema.rb") }
 
+  def insert_example(title: SecureRandom.hex(8), status: "draft", score: 0)
+    @connection.execute(<<~SQL.squish)
+      INSERT INTO examples (title, status, score, created_at, updated_at)
+      VALUES (
+        #{@connection.quote(title)},
+        #{@connection.quote(status)},
+        #{Integer(score)},
+        CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP
+      )
+    SQL
+  end
+
   it "defines the replacement initial migration" do
     expect(migration_path).to exist
   end
@@ -55,10 +68,11 @@ RSpec.describe "CreateExampleSchema migration" do
       expect(@connection.table_exists?("email_templates")).to be(false)
     end
 
-    it "uses UUID primary keys with generated defaults" do
+    it "uses generated UUID ids as primary keys" do
       %w[examples example_categories example_tags].each do |table_name|
         id_column = @connection.columns(table_name).find { |column| column.name == "id" }
 
+        expect(@connection.primary_key(table_name)).to eq("id")
         expect(id_column.sql_type).to eq("uuid")
         expect(id_column.default_function).to eq("gen_random_uuid()")
       end
@@ -99,6 +113,43 @@ RSpec.describe "CreateExampleSchema migration" do
         "draft", "active", "archived"
       )
       expect(constraints.fetch("examples_score_check").expression).to match(/score.*(?:BETWEEN|>=).*100/i)
+    end
+
+    it "accepts every allowed status" do
+      %w[draft active archived].each do |status|
+        insert_example(status: status, score: 50)
+      end
+
+      expect(@connection.select_values("SELECT status FROM examples")).to contain_exactly(
+        "draft", "active", "archived"
+      )
+    end
+
+    it "accepts both score boundaries" do
+      [ 0, 100 ].each do |score|
+        insert_example(score: score)
+      end
+
+      scores = @connection.select_values("SELECT score FROM examples").map(&:to_i)
+      expect(scores).to contain_exactly(0, 100)
+    end
+
+    it "rejects a status outside the allowed set" do
+      expect do
+        @connection.transaction(requires_new: true) do
+          insert_example(status: "pending", score: 50)
+        end
+      end.to raise_error(ActiveRecord::StatementInvalid, /examples_status_check/)
+    end
+
+    it "rejects scores outside both boundaries" do
+      [ -1, 101 ].each do |score|
+        expect do
+          @connection.transaction(requires_new: true) do
+            insert_example(score: score)
+          end
+        end.to raise_error(ActiveRecord::StatementInvalid, /examples_score_check/)
+      end
     end
 
     it "adds unique indexes for category and tag names" do
