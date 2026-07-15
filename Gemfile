@@ -75,13 +75,9 @@ gem "rack-cors"
 gem "rack-attack"
 # Swagger를 위한 Gem
 gem "rswag"
-# Sentry를 위한 Gem
-gem "sentry-rails"
-gem "sentry-ruby"
 # 백그라운드 작업을 위한 Gem
 gem "sidekiq", ">= 7.3.3"
 gem "sidekiq-cron", "~> 2.0"
-gem "sendgrid-ruby", "~> 6.7"
 # zip 파일을 핸들링하기 위한 Gem
 gem "rubyzip"
 # 웹소켓 통신을 위한 Gem

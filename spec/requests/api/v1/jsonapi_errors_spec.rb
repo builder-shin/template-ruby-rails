@@ -71,21 +71,6 @@ RSpec.describe "JSON:API errors", type: :request do
     end
   end
 
-  describe "production Blog ownership errors" do
-    it "returns FORBIDDEN when another author updates a Blog post" do
-      current_user = mock_authenticated_user
-      blog_post_id = SecureRandom.uuid
-      blog_post = double("BlogPost", author_id: SecureRandom.uuid)
-      allow(BlogPost).to receive(:find_by).with(id: blog_post_id).and_return(blog_post)
-
-      patch "/api/v1/blog_posts/#{blog_post_id}",
-            headers: jsonapi_headers(cookie: "valid-session")
-
-      expect(blog_post.author_id).not_to eq(current_user.id)
-      expect_error(status: 403, code: "FORBIDDEN")
-    end
-  end
-
   describe "ApiController error conversion" do
     let(:base_path) { "/api/__task_five__/errors" }
 

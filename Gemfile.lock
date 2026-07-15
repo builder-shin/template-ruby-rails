@@ -405,7 +405,6 @@ GEM
     ruby-vips (2.3.0)
       ffi (~> 1.12)
       logger
-    ruby_http_client (3.6.0)
     rubyzip (2.3.2)
     securerandom (0.4.1)
     selenium-webdriver (4.23.0)
@@ -414,14 +413,6 @@ GEM
       rexml (~> 3.2, >= 3.2.5)
       rubyzip (>= 1.2.2, < 3.0)
       websocket (~> 1.0)
-    sendgrid-ruby (6.7.0)
-      ruby_http_client (~> 3.4)
-    sentry-rails (5.19.0)
-      railties (>= 5.0)
-      sentry-ruby (~> 5.19.0)
-    sentry-ruby (5.19.0)
-      bigdecimal
-      concurrent-ruby (~> 1.0, >= 1.0.2)
     shoulda-matchers (6.4.0)
       activesupport (>= 5.2.0)
     sidekiq (8.1.0)
@@ -527,9 +518,6 @@ DEPENDENCIES
   ruby-lsp-rails
   rubyzip
   selenium-webdriver
-  sendgrid-ruby (~> 6.7)
-  sentry-rails
-  sentry-ruby
   shoulda-matchers
   sidekiq (>= 7.3.3)
   sidekiq-cron (~> 2.0)
