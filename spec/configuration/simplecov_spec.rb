@@ -11,28 +11,54 @@ RSpec.describe "SimpleCov configuration" do
     raise SyntaxError, "Invalid Ruby source" unless syntax_tree
 
     lines = source.lines
-    call_line_numbers(syntax_tree, method_name).map { |line_number| lines.fetch(line_number - 1).strip }
+    start_blocks = syntax_tree[1].select { |statement| simplecov_start_block?(statement) }
+    return [] unless start_blocks.one?
+
+    start_block = start_blocks.first
+    start_token = direct_call_token(start_block[1])
+    return [] unless lines.fetch(start_token[2].first - 1).strip == 'SimpleCov.start "rails" do'
+
+    direct_block_statements(start_block).filter_map do |statement|
+      method_token = direct_call_token(statement)
+      lines.fetch(method_token[2].first - 1).strip if method_token&.first == :@ident && method_token[1] == method_name
+    end
   end
 
-  def call_line_numbers(node, method_name)
-    return [] unless node.is_a?(Array)
-
-    method_token = case node.first
+  def direct_call_token(node)
+    case node&.first
     when :command, :fcall, :vcall
       node[1]
     when :call, :command_call
       node[3]
+    when :method_add_arg, :method_add_block
+      direct_call_token(node[1])
     end
+  end
 
-    line_numbers = []
-    if method_token&.first == :@ident && method_token[1] == method_name
-      line_numbers << method_token[2].first
+  def direct_call_receiver(node)
+    case node&.first
+    when :call, :command_call
+      node[1]
+    when :method_add_arg, :method_add_block
+      direct_call_receiver(node[1])
     end
+  end
 
-    node.each do |child|
-      line_numbers.concat(call_line_numbers(child, method_name)) if child.is_a?(Array)
-    end
-    line_numbers
+  def simplecov_start_block?(node)
+    return false unless node&.first == :method_add_block
+
+    method_token = direct_call_token(node[1])
+    receiver = direct_call_receiver(node[1])
+    method_token&.first == :@ident && method_token[1] == "start" &&
+      receiver&.first == :var_ref && receiver.dig(1, 0) == :@const && receiver.dig(1, 1) == "SimpleCov"
+  end
+
+  def direct_block_statements(start_block)
+    block = start_block[2]
+    body = block[2]
+    return [] unless block.first == :do_block && body&.first == :bodystmt
+
+    body[1] || []
   end
 
   it "uses the environment minimum with an 80 percent default" do
@@ -58,12 +84,14 @@ RSpec.describe "SimpleCov configuration" do
 
   it "ignores matching comments and preserves actual duplicate declarations" do
     source = <<~RUBY
-      # minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "80").to_f
-      minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "81").to_f
-      minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "80").to_f
-      # track_files "app/**/*.rb"
-      track_files "lib/**/*.rb"
-      track_files "app/**/*.rb"
+      SimpleCov.start "rails" do
+        # minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "80").to_f
+        minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "81").to_f
+        minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "80").to_f
+        # track_files "app/**/*.rb"
+        track_files "lib/**/*.rb"
+        track_files "app/**/*.rb"
+      end
     RUBY
 
     expect(call_declarations(source, "minimum_coverage")).to eq(
@@ -79,12 +107,14 @@ RSpec.describe "SimpleCov configuration" do
 
   it "collects parenthesized, regexp, block, and receiver filter calls" do
     source = <<~RUBY
-      add_filter("tmp/")
-      add_filter %r{/generated/}
-      add_filter do |source_file|
-        source_file.filename.include?("ignored")
+      SimpleCov.start "rails" do
+        add_filter("tmp/")
+        add_filter %r{/generated/}
+        add_filter do |source_file|
+          source_file.filename.include?("ignored")
+        end
+        SimpleCov.add_filter("receiver/")
       end
-      SimpleCov.add_filter("receiver/")
     RUBY
 
     expect(call_declarations(source, "add_filter")).to eq(
@@ -95,5 +125,38 @@ RSpec.describe "SimpleCov configuration" do
         'SimpleCov.add_filter("receiver/")'
       ]
     )
+  end
+
+  it "excludes declarations inside unreachable branches and method definitions" do
+    source = <<~RUBY
+      SimpleCov.start "rails" do
+        if false
+          minimum_coverage ENV.fetch("COVERAGE_MINIMUM", "80").to_f
+          add_filter "app/channels/application_cable/"
+        end
+
+        def deferred_coverage
+          track_files "app/**/*.rb"
+          add_filter "app/helpers/application_helper.rb"
+        end
+      end
+    RUBY
+
+    expect(call_declarations(source, "minimum_coverage")).to be_empty
+    expect(call_declarations(source, "track_files")).to be_empty
+    expect(call_declarations(source, "add_filter")).to be_empty
+  end
+
+  it "rejects duplicate rails profile blocks" do
+    source = <<~RUBY
+      SimpleCov.start "rails" do
+      end
+
+      SimpleCov.start "rails" do
+        track_files "app/**/*.rb"
+      end
+    RUBY
+
+    expect(call_declarations(source, "track_files")).to be_empty
   end
 end
