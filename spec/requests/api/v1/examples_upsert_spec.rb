@@ -182,6 +182,9 @@ RSpec.describe "Example atomic PUT upsert", type: :request do
       bodies = [ "First", "Second" ].map do |title|
         put_document(id: resource_id, title: title, relationships: relationships)
       end
+      expect(
+        Rails.application.routes.recognize_path(resource_path(resource_id), method: :put)
+      ).to include(controller: "api/v1/examples", action: "upsert")
 
       threads = bodies.map do |body|
         Thread.new do
