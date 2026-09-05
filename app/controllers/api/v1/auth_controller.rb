@@ -46,6 +46,33 @@ module Api
       EMAIL_MAX_LENGTH = 254
       private_constant :EMAIL_MAX_LENGTH
 
+      # 이메일 형식. 정본 EmailStr(email-validator 2.3.0)과 경계값을 맞추되 새
+      # gem을 들이지 않는다. `URI::MailTo::EMAIL_REGEXP`를 쓰지 않는 이유:
+      # 그것은 ASCII 전용이라 정본이 정상으로 받는 비ASCII 주소
+      # ("shørt@example.com", "user@éxample.com")를 거절한다 — 실사용자의 가입을
+      # 막는 방향이라 쓰레기 입력이 통과하는 것보다 나쁘다. 반대로 도메인에
+      # 점이 없는 "a@b"는 통과시켜 정본보다 느슨하기도 했다.
+      #
+      # 로컬파트 원자: ASCII는 RFC 5322 atext, 비ASCII는 구분자(\p{Z})와 제어·
+      # 형식 문자(\p{C})만 뺀 전부. 정본의 ATEXT_INTL(U+0080 이상을 전부 허용)과
+      # "unsafe characters" 거절(NBSP·EN QUAD·ZWSP·IDEOGRAPHIC SPACE·ZWNBSP·
+      # LINE SEPARATOR·SOFT HYPHEN)에 대응한다 — 80개 표본에서 판정이 전부 같다.
+      # 원자 사이의 점은 아래에서 따로 이어 붙인다. 그래서 앞뒤 점과 연속된 점
+      # (dot-atom 위반: ".a@b.com" / "a.@b.com" / "a..b@c.com")이 걸린다.
+      EMAIL_LOCAL_ATOM = /(?:[[:alnum:]!\#$%&'*+\/=?^_`{|}~-]|[^\p{ASCII}\p{Z}\p{C}])+/
+      # 도메인 라벨: 1~63자이고 하이픈으로 시작하거나 끝나지 않는다. IDN 글자와
+      # 결합 문자(NFD로 들어온 "é" = "e" + U+0301)는 허용하고 이모지·기호는
+      # 허용하지 않는다 — 정본에서 IDNA가 막는 것과 같은 층위다(실측:
+      # "a@b例.com" 201, "a@b☃.com"·"a@b😀.com" 422).
+      EMAIL_DOMAIN_LABEL = /[[:alnum:]](?:[[:alnum:]\p{M}-]{0,61}[[:alnum:]\p{M}])?/
+      # 도메인은 점을 최소 하나 가져야 한다 — 정본은 "a@b"를 거절한다.
+      EMAIL_FORMAT = /\A#{EMAIL_LOCAL_ATOM}(?:\.#{EMAIL_LOCAL_ATOM})*@#{EMAIL_DOMAIN_LABEL}(?:\.#{EMAIL_DOMAIN_LABEL})+\z/
+      # 정본은 TLD가 전부 숫자인 도메인을 "globally deliverable이 아니다"로
+      # 거절한다("a@b.1", "a@192.168.0.1"). ICANN도 전부 숫자인 TLD를 허용하지
+      # 않는다. 정규식 안에 부정 전방탐색으로 욱여넣는 대신 한 줄로 분리해 둔다.
+      EMAIL_NUMERIC_TLD = /\.[0-9]+\z/
+      private_constant :EMAIL_LOCAL_ATOM, :EMAIL_DOMAIN_LABEL, :EMAIL_FORMAT, :EMAIL_NUMERIC_TLD
+
       # 가입. 스펙 6.7 — 중복은 사전 조회로 막지 않는다. User#email에는
       # uniqueness 검증이 없다(app/models/user.rb 참고) — DB 유니크 인덱스가
       # INSERT 시점에 막게 두고, 그 위반(ActiveRecord::RecordNotUnique)만 여기서
@@ -265,14 +292,14 @@ module Api
       #      그것이고, 정본도 형식 검증을 통과한 값을 뒤이어 casefold해 쓴다.
       #      (예: "aß@example.com"의 폴딩 결과 "ass@example.com"은 ASCII라 아래
       #      정규식을 통과한다. 원본에 걸면 폴딩이 ASCII를 만들어 내는 이 경우를
-      #      부당하게 거절한다.) 정본은 EmailStr(email-validator)이라 경계값이
-      #      완전히 같지는 않다 — 남는 차이는 태스크 보고서에 목록으로 적었다.
-      #      새 gem 없이 Ruby 표준 라이브러리의 URI::MailTo::EMAIL_REGEXP를 쓴다.
+      #      부당하게 거절한다.) EMAIL_FORMAT·EMAIL_NUMERIC_TLD 코멘트 참고.
+      #   5. TLD가 전부 숫자면 거절한다 — 4번과 별개의 판정이라 따로 둔다.
       def normalized_email!(attributes)
         raw = bounded_string!(attributes, "email", min: 1, max: EMAIL_MAX_LENGTH)
         email = normalize_email(raw)
         invalid_attribute!("email") unless email.length.between?(1, EMAIL_MAX_LENGTH)
-        invalid_attribute!("email") unless email.match?(URI::MailTo::EMAIL_REGEXP)
+        invalid_attribute!("email") unless email.match?(EMAIL_FORMAT)
+        invalid_attribute!("email") if email.match?(EMAIL_NUMERIC_TLD)
 
         email
       end

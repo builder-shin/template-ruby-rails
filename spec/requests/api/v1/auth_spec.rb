@@ -173,17 +173,19 @@ RSpec.describe "Api::V1::Auth", type: :request do
     # 무인증 공개 라우트가 요청 본문 하나로 500을 내는 갈래였다.
     #
     # 이 테스트가 형식 검증(아래 "rejects a syntactically invalid email")과
-    # 우연히 같은 세계를 보지 않는다는 점이 중요하다: 폴딩 결과는 순수 ASCII라
-    # URI::MailTo::EMAIL_REGEXP를 **통과한다**. 즉 이 입력을 거절하는 유일한
-    # 이유는 "정규화 후 길이"뿐이다.
+    # 우연히 같은 세계를 보지 않는다는 점이 중요하다. 그것을 구현 상수를
+    # 들여다보지 않고 **동작으로** 고정한다: 같은 모양이되 짧은 주소는 201로
+    # 가입된다 — 즉 긴 쪽이 거절되는 유일한 이유는 "정규화 후 길이"다.
     it "rejects an email that only exceeds 254 characters after case folding with 422, not 500" do
       raw = "#{'a' * 230}#{'ß' * 11}@example.com"
       folded = raw.strip.downcase(:fold)
       aggregate_failures do
         expect(raw.length).to eq(253)
         expect(folded.length).to eq(264)
-        expect(folded).to match(URI::MailTo::EMAIL_REGEXP)
       end
+
+      register!(email: "#{'a' * 10}#{'ß' * 11}@example.com", password: password)
+      expect(response).to have_http_status(:created)
 
       register!(email: raw, password: password)
 
@@ -192,16 +194,50 @@ RSpec.describe "Api::V1::Auth", type: :request do
     end
 
     # 정본은 `AuthEmail = Annotated[EmailStr, Field(max_length=254)]`로 형식까지
-    # 본다 — 아래 세 값 전부 422다(정본의 pydantic 스키마를 직접 실행해 실측).
+    # 본다 — 아래 값 전부 422다(정본의 pydantic 스키마를 직접 실행해 실측).
     # swagger_helper.rb도 email에 `format: "email"`을 이미 문서화해 두었다.
     it "rejects a syntactically invalid email with 422 VALIDATION_ERROR" do
       aggregate_failures do
-        [ "not-an-email", "a b@c d", "a" ].each do |bad|
+        [ "not-an-email", "a b@c d", "a", "a@b", ".a@b.com", "a..b@c.com", "a@-b.com" ].each do |bad|
           expect do
             register!(email: bad, password: password)
           end.not_to change(User, :count)
           expect_error(status: 422, code: "VALIDATION_ERROR")
           expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/email")
+        end
+      end
+    end
+
+    # TLD가 전부 숫자인 도메인은 정본이 "globally deliverable이 아니다"로
+    # 거절한다(실측: "The part after the @-sign is not valid. It is not within a
+    # valid top-level domain."). 형식 정규식과는 별개의 판정이라 별도 테스트로
+    # 둔다 — 두 가드를 각각 죽일 수 있어야 한다.
+    it "rejects a domain whose top-level label is all digits with 422 VALIDATION_ERROR" do
+      aggregate_failures do
+        [ "a@b.1", "a@192.168.0.1" ].each do |bad|
+          register!(email: bad, password: password)
+          expect_error(status: 422, code: "VALIDATION_ERROR")
+          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/email")
+        end
+      end
+    end
+
+    # 1차 파동이 URI::MailTo::EMAIL_REGEXP(ASCII 전용)를 쓰는 바람에 정본이
+    # 201로 받는 비ASCII 주소를 422로 거절했다 — 고치기 전보다 나쁜 상태였다.
+    # 이 가드가 없으면 그 회귀가 조용히 다시 들어온다. 정본에서 아래 넷 전부
+    # 201임을 직접 실행해 확인했다.
+    it "accepts internationalized addresses the canonical accepts" do
+      aggregate_failures do
+        {
+          "shørt@example.com" => "shørt@example.com",
+          "user@éxample.com" => "user@éxample.com",
+          "例え@example.com" => "例え@example.com",
+          "Ünïcode@例え.テスト" => "ünïcode@例え.テスト"
+        }.each do |raw, normalized|
+          register!(email: raw, password: password)
+
+          expect(response).to have_http_status(:created)
+          expect(parsed_body.dig("data", "attributes", "email")).to eq(normalized)
         end
       end
     end
@@ -235,6 +271,28 @@ RSpec.describe "Api::V1::Auth", type: :request do
       post "/api/v1/auth/register", params: { data: "oops" }.to_json, headers: jsonapi_headers
 
       expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+    end
+
+    # 위 테스트는 `data` 자체가 객체가 아닌 경우만 본다 — 멤버(attributes /
+    # relationships)의 모양 검증은 별개의 갈래이고 무가드였다(실측: shape_checked_member가
+    # raise하지 않게 바꿔도 66예제가 전부 통과). 그 상태에서 실제 동작은
+    # 400 INVALID_JSONAPI_DOCUMENT → 422 VALIDATION_ERROR(또는 201)로 바뀌어
+    # CrudActions#validate_write_member_shape!와 갈라진다.
+    it "rejects a non-object attributes member with 400 INVALID_JSONAPI_DOCUMENT" do
+      post "/api/v1/auth/register", params: { data: { type: "users", attributes: "oops" } }.to_json,
+                                     headers: jsonapi_headers
+
+      expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+      expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes")
+    end
+
+    it "rejects a non-object relationships member with 400 INVALID_JSONAPI_DOCUMENT" do
+      body = { data: { type: "users", attributes: { email: email, password: password }, relationships: "oops" } }
+
+      post "/api/v1/auth/register", params: body.to_json, headers: jsonapi_headers
+
+      expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+      expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/relationships")
     end
 
     describe "concurrent registration with the same email (real PostgreSQL unique index)" do
@@ -368,6 +426,28 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect_error(status: 401, code: "INVALID_CREDENTIALS")
     end
 
+    # 스펙 6.5의 5단계 — 2단계(잠그지 않은 조회)와 4단계(SELECT ... FOR UPDATE)
+    # 사이에 행이 삭제된 좁은 경합. 이 가드가 없으면 `nil.is_active?`가 불려
+    # NoMethodError → **500**이 난다(무가드였다: 가드를 지워도 39예제가 전부
+    # 통과했다).
+    #
+    # 잠금 **조회**만 nil을 돌려주게 만들고 컨트롤러의 nil 가드 자체는 진짜
+    # 구현이 돌게 둔다. 가드를 스텁으로 바꿔치기하면 그 가드를 지워도 통과하는
+    # 가짜 가드가 된다 — Task 5의 `email_uniqueness_violation?` 전례가 정확히
+    # 그것이었다. 2단계의 `User.find_by(email:)`는 그대로 진짜 행을 돌려주므로
+    # 비밀번호 검증(argon2)도 실제로 통과한다.
+    it "returns 401 INVALID_CREDENTIALS, not 500, when the row disappears between the password check and the lock" do
+      register!(email: "vanished@example.com", password: "correct-horse-battery")
+      user = User.find_by!(email: "vanished@example.com")
+      locked_scope = instance_double(ActiveRecord::Relation)
+      allow(User).to receive(:lock).and_return(locked_scope)
+      allow(locked_scope).to receive(:find_by).with(id: user.id).and_return(nil)
+
+      login!(email: "vanished@example.com", password: "correct-horse-battery")
+
+      expect_error(status: 401, code: "INVALID_CREDENTIALS")
+    end
+
     it "returns 403 USER_INACTIVE for the correct password on an inactive account" do
       register!(email: "inactive2@example.com", password: "correct-horse-battery")
       User.find_by!(email: "inactive2@example.com").update!(is_active: false)
@@ -395,6 +475,109 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
+    # 스펙 6.5의 4단계가 여는 행 잠금(SELECT ... FOR UPDATE)의 가드.
+    #
+    # 잠금을 지워도(`User.lock.find_by` → `User.find_by`) 위의 모든 테스트가
+    # 통과한다 — READ COMMITTED에서는 **이미 커밋된** 비활성화라면 잠금 없는
+    # 재조회도 그대로 보기 때문이다. 즉 커밋된 상태만 다루는 테스트로는 두
+    # 세계가 원천적으로 구별되지 않는다. 구별되는 것은 **아직 커밋되지 않은**
+    # 비활성화가 진행 중인 순간 하나다:
+    #
+    #   잠금 있음 — 로그인이 그 트랜잭션을 기다렸다가 새 값을 보고 403을 내고
+    #               세션을 발급하지 않는다.
+    #   잠금 없음 — 기다리지 않고 옛 값(is_active = true)을 보고 200 + 세션 발급.
+    #               그 뒤 비활성화가 커밋되면 비활성 계정의 살아 있는 세션이 남는다.
+    #
+    # 정본 test_login_rechecks_active_state_after_concurrent_deactivation이
+    # 지키는 성질과 같다.
+    #
+    # sleep으로 타이밍을 맞추지 않는다 — pg_stat_activity로 그 요청이 실제로
+    # users 행 잠금을 기다렸다는 사실을 관측하고 **관측 자체를 단언한다**.
+    # 관측이 실패하면(잠금이 없어서 기다린 적이 없으면) 상태 코드와 무관하게
+    # 테스트가 깨진다. 이 저장소의 example_relationship_concurrency_spec.rb와
+    # 같은 패턴이다.
+    describe "row lock, measured against an uncommitted concurrent deactivation" do
+      self.use_transactional_tests = false
+
+      before do
+        ActiveRecord::Base.connection_handler.clear_active_connections!
+        DatabaseCleaner.clean_with(:truncation)
+      end
+
+      after do
+        @login_thread&.join(10)
+        ActiveRecord::Base.connection_handler.clear_active_connections!
+        DatabaseCleaner.clean_with(:truncation)
+        ActiveRecord::Base.connection_handler.clear_active_connections!
+      end
+
+      def wait_for_user_lock_waiter(pid)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+        loop do
+          rows = ActiveRecord::Base.connection_pool.with_connection do |connection|
+            connection.exec_query(<<~SQL.squish).to_a
+              SELECT state, wait_event_type, query FROM pg_stat_activity WHERE pid = #{Integer(pid)}
+            SQL
+          end
+          return true if rows.any? do |row|
+            row["wait_event_type"] == "Lock" && row["query"].to_s.match?(/SELECT.+users.+FOR UPDATE/im)
+          end
+          return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+          sleep 0.02
+        end
+      end
+
+      it "waits for the deactivating transaction and then refuses to issue a session" do
+        email = "lock-race-#{SecureRandom.hex(4)}@example.com"
+        register!(email: email, password: "correct-horse-battery")
+        user_id = User.find_by!(email: email).id
+        backend_pids = Queue.new
+        results = Queue.new
+        lock_connection = nil
+
+        ActiveRecord::Base.connection_handler.clear_active_connections!
+        lock_connection = ActiveRecord::Base.connection_pool.checkout
+        lock_connection.begin_db_transaction
+        quoted_id = lock_connection.quote(user_id)
+        lock_connection.exec_query("SELECT id FROM users WHERE id = #{quoted_id} FOR UPDATE")
+        lock_connection.exec_query("UPDATE users SET is_active = false WHERE id = #{quoted_id}")
+
+        @login_thread = Thread.new do
+          ActiveRecord::Base.connection_pool.with_connection do |connection|
+            session = ActionDispatch::Integration::Session.new(Rails.application)
+            backend_pids << connection.raw_connection.backend_pid
+            session.post("/api/v1/auth/login",
+                         params: login_body(email: email, password: "correct-horse-battery"),
+                         headers: jsonapi_headers)
+            results << [ session.response.status, session.response.body ]
+          end
+        end
+
+        waited_for_user_lock = wait_for_user_lock_waiter(backend_pids.pop)
+        lock_connection.commit_db_transaction
+        ActiveRecord::Base.connection_pool.checkin(lock_connection)
+        lock_connection = nil
+
+        status, body = results.pop
+        aggregate_failures do
+          expect(waited_for_user_lock).to be(true)
+          expect(status).to eq(403)
+          expect(JSON.parse(body).dig("errors", 0, "code")).to eq("USER_INACTIVE")
+          expect(RefreshSession.where(user_id: user_id).count).to eq(0)
+        end
+      ensure
+        if lock_connection
+          begin
+            lock_connection.rollback_db_transaction
+          rescue StandardError
+            nil
+          end
+          ActiveRecord::Base.connection_pool.checkin(lock_connection)
+        end
+      end
+    end
+
     # register 쪽과 같은 이유(그쪽 코멘트 참고). login에도 같은 갈래가 있고,
     # 정본이 register/login 양쪽에 같은 AuthEmail을 쓰므로 양쪽에 건다.
     it "rejects an email that only exceeds 254 characters after case folding with 422, not 500" do
@@ -409,12 +592,24 @@ RSpec.describe "Api::V1::Auth", type: :request do
 
     it "rejects a syntactically invalid email with 422 VALIDATION_ERROR" do
       aggregate_failures do
-        [ "not-an-email", "a b@c d", "a" ].each do |bad|
+        [ "not-an-email", "a b@c d", "a", "a@b", ".a@b.com", "a..b@c.com", "a@-b.com", "a@b.1" ].each do |bad|
           login!(email: bad, password: "correct-horse-battery")
           expect_error(status: 422, code: "VALIDATION_ERROR")
           expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/email")
         end
       end
+    end
+
+    # register 쪽과 같은 이유(그쪽 코멘트 참고) — 정본이 register/login 양쪽에
+    # 같은 AuthEmail을 쓰므로 비ASCII 주소가 **로그인까지** 되어야 한다.
+    # 가입만 되고 로그인이 안 되면 계정이 잠기는 것과 같다.
+    it "logs in with an internationalized address" do
+      register!(email: "shørt@example.com", password: "correct-horse-battery")
+      expect(response).to have_http_status(:created)
+
+      login!(email: "SHØRT@Example.com", password: "correct-horse-battery")
+
+      expect(response).to have_http_status(:ok)
     end
 
     it "rejects data.type other than authCredentials with 409 TYPE_MISMATCH" do
