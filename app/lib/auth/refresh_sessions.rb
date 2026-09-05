@@ -76,6 +76,17 @@ module Auth
     # 반환한다. 아래 세 갈래는 전부 `load_verified_session`이 사용자→세션 순서로
     # 잠근 뒤의 이야기다.
     def rotate(raw_token)
+      # 호출자가 트랜잭션을 열지 않으면 아래의 모든 보장이 조용히 사라진다: 트랜잭션
+      # 밖에서는 `SELECT ... FOR UPDATE` 각각이 자기만의 단일 문장 트랜잭션으로
+      # 실행되고, 그 잠금은 다음 문장이 실행되기 전에 이미 풀린다. 그러면 같은
+      # refresh token으로 동시에 들어온 두 요청이 둘 다 "아직 안 끊겼다"를 보고
+      # 각자 새 세션을 만들 수 있다 — 재사용 감지가 있으나 마나 해진다. 이 계약은
+      # 모듈 코멘트(6-11번째 줄)에 이미 적혀 있지만 문서만으로는 아무도 강제하지
+      # 않으므로 여기서 직접 강제한다. 여기서 raise하는 것은 "토큰이 이상하다"가
+      # 아니라 "호출자가 계약을 어겼다"이므로 Failure가 아니라 예외다 — 모듈
+      # 코멘트가 구분한 두 갈래(21-24번째 줄) 중 후자다.
+      raise "caller must own the transaction" unless ActiveRecord::Base.connection.transaction_open?
+
       verified = load_verified_session(raw_token)
       return verified if verified.is_a?(Failure)
 
@@ -119,6 +130,9 @@ module Auth
     # 지켜준다. rotate와 달리 logout은 revoked_at이 이미 있어도 그 사용자의 다른
     # 세션을 건드리지 않는다 — 재사용 감지는 rotate만의 책임이다.
     def logout(raw_token)
+      # rotate 위 코멘트와 같은 이유로 같은 가드를 둔다.
+      raise "caller must own the transaction" unless ActiveRecord::Base.connection.transaction_open?
+
       verified = load_verified_session(raw_token)
       return verified if verified.is_a?(Failure)
 

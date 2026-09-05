@@ -286,6 +286,27 @@ RSpec.describe Auth::Tokens do
       end
     end
 
+    # F2 (팀장 fix round 1): ruby-jwt 3.2.0을 컨테이너에서 실측하면 token이 String이
+    # 아닐 때 `JWT::EncodedToken#initialize`가 `ArgumentError, "Provided JWT must be
+    # a String"`을 던지고, 이 gem 내부 예외는 decode_payload의 rescue 목록
+    # (JWT::DecodeError/NoMethodError/TypeError/RangeError) 어디에도 안 걸린다 —
+    # Auth::RefreshSessions.rotate/logout은 "토큰이 이상하면 전부 Failure 반환값"이라고
+    # 말하는데, {"refresh_token": 123}처럼 JSON 정수로 온 값이 컨트롤러 파라미터에서
+    # 그대로 여기까지 오면 그 계약이 깨져 401 대신 500이 났다. non-String 자체를
+    # decode_payload 맨 앞에서 직접 거절해 이 gem 예외를 아예 만나지 않게 막는다.
+    it "rejects non-String token types instead of leaking the gem's internal ArgumentError" do
+      aggregate_failures do
+        [ 123, 3.5, [], {}, true, false, :sym ].each do |non_string_token|
+          expect { described_class.decode(non_string_token, expected_type: "access") }
+            .to raise_error(Auth::Tokens::InvalidToken)
+        end
+      end
+    end
+
+    it "rejects a non-String token via decode_expired_refresh too (same decode_payload choke point)" do
+      expect { described_class.decode_expired_refresh(12_345) }.to raise_error(Auth::Tokens::InvalidToken)
+    end
+
     it "rejects the 'none' algorithm attack" do
       header = { "alg" => "none", "typ" => "JWT" }
       segments = [ header, valid_payload ].map { |part| Base64.urlsafe_encode64(JSON.generate(part), padding: false) }

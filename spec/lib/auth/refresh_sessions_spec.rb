@@ -121,6 +121,37 @@ RSpec.describe Auth::RefreshSessions do
       end
     end
 
+    describe "lock order (F3)" do
+      it "locks the users row before the refresh_sessions row" do
+        # 이 코멘트대로 코드가 실제로 동작하는지 SQL을 직접 엿듣지 않고는 확인할 길이
+        # 없다 -- 순서를 반대로 바꿔도(세션 먼저, 사용자 나중) 23개 기존 예제가 전부
+        # 그대로 통과한다는 것이 팀장 재현으로 이미 확인됐다: 이 모듈의 진입점이
+        # 하나뿐이라 자기 자신과는 교착하지 않기 때문이다. `sql.active_record`
+        # 알림을 구독해 실제로 나간 쿼리 순서를 본다.
+        pair = issue_pair_for(user)
+        queries = []
+        subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
+          queries << payload[:sql]
+        end
+
+        begin
+          in_transaction { described_class.rotate(pair.refresh_token) }
+        ensure
+          ActiveSupport::Notifications.unsubscribe(subscriber)
+        end
+
+        user_lock_index = queries.index { |sql| sql.match?(/FROM\s+"users".*FOR UPDATE/) }
+        session_lock_index = queries.index { |sql| sql.match?(/FROM\s+"refresh_sessions".*FOR UPDATE/) }
+        context = "captured queries:\n#{queries.each_with_index.map { |q, i| "  [#{i}] #{q}" }.join("\n")}"
+
+        aggregate_failures do
+          expect(user_lock_index).not_to(be_nil, -> { "no `users ... FOR UPDATE` query found.\n#{context}" })
+          expect(session_lock_index).not_to(be_nil, -> { "no `refresh_sessions ... FOR UPDATE` query found.\n#{context}" })
+          expect(user_lock_index).to(be < session_lock_index, -> { "users lock did not precede refresh_sessions lock.\n#{context}" })
+        end
+      end
+    end
+
     describe "reuse detection" do
       it "revokes every OTHER active session of the same user, leaves another user's session alone, and returns TOKEN_REVOKED" do
         pair = issue_pair_for(user)
@@ -393,6 +424,55 @@ RSpec.describe Auth::RefreshSessions do
         # 같은 토큰은 정상 클라이언트의 재시도인지 탈취인지 구분할 수 없다.
         expect(RefreshSession.where(user_id: concurrent_user.id, revoked_at: nil).count).to eq(0)
       end
+    end
+  end
+
+  # F1 (팀장 fix round 1): "트랜잭션은 호출자가 소유한다"는 계약이 모듈 코멘트에만
+  # 적혀 있고 강제되지 않으면, 컨트롤러가 실수로 트랜잭션 밖에서 rotate/logout을
+  # 부르는 순간 이 파일의 모든 보장(잠금·재사용 감지·원자적 회전)이 조용히
+  # 사라진다 -- 에러도, 실패하는 테스트도 없이. 기본 트랜잭션 픽스처(`use_transactional_
+  # tests = true`, rails_helper.rb) 아래서는 매 예제가 이미 RSpec이 열어 둔 트랜잭션
+  # 안에서 돌므로 `transaction_open?`이 언제나 true다 -- 이 describe 블록 전체가
+  # `use_transactional_tests = false`인 이유가 그것이다. 이걸 빼고 쓴 테스트는
+  # 가드가 있든 없든 통과해서, 있어 보이지만 아무것도 지키지 않는 테스트가 된다.
+  describe "the caller-owned-transaction contract is enforced (F1)" do
+    self.use_transactional_tests = false
+
+    before do
+      ActiveRecord::Base.connection_handler.clear_active_connections!
+      DatabaseCleaner.clean_with(:truncation)
+    end
+
+    after do
+      ActiveRecord::Base.connection_handler.clear_active_connections!
+      DatabaseCleaner.clean_with(:truncation)
+      ActiveRecord::Base.connection_handler.clear_active_connections!
+    end
+
+    it "raises when rotate is called with no open transaction" do
+      real_user = create(:user)
+      pair = ActiveRecord::Base.transaction { described_class.issue_for_locked_user(real_user) }
+
+      expect { described_class.rotate(pair.refresh_token) }
+        .to raise_error(/caller must own the transaction/)
+    end
+
+    it "raises when logout is called with no open transaction" do
+      real_user = create(:user)
+      pair = ActiveRecord::Base.transaction { described_class.issue_for_locked_user(real_user) }
+
+      expect { described_class.logout(pair.refresh_token) }
+        .to raise_error(/caller must own the transaction/)
+    end
+
+    it "does not raise, and behaves normally, when the caller does wrap the call in a transaction" do
+      real_user = create(:user)
+      pair = ActiveRecord::Base.transaction { described_class.issue_for_locked_user(real_user) }
+
+      result = nil
+      expect { result = ActiveRecord::Base.transaction { described_class.rotate(pair.refresh_token) } }
+        .not_to raise_error
+      expect(result).to be_a(described_class::TokenPair)
     end
   end
 end

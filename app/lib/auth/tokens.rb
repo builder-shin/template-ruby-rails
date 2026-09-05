@@ -81,6 +81,20 @@ module Auth
     end
 
     def decode_payload(token, verify_expiration:)
+      # ruby-jwt 3.2.0을 컨테이너에서 실측: token이 String이 아니면(Integer/Float/
+      # Array/Hash/true/Symbol 등) `JWT::EncodedToken#initialize`가
+      # `ArgumentError, "Provided JWT must be a String"`를 던진다 — 아래 rescue
+      # 목록(JWT::DecodeError/NoMethodError/TypeError/RangeError) 어디에도 안 걸려
+      # 그대로 새어나간다. 여기서 rescue에 ArgumentError를 추가하는 대신 미리
+      # 걸러내는 이유: ArgumentError는 Ruby 어디서나 나는 흔한 예외라 rescue 목록에
+      # 더하면 이 메서드 안에서 일어나는(예: 설정값이 잘못돼 JWT.decode 내부가
+      # 다른 이유로 ArgumentError를 내는) 진짜 프로그래밍 오류까지 "이 토큰을
+      # 신뢰할 수 없다"로 뭉개 버릴 수 있다. 또한 이 가드는 ruby-jwt가 앞으로
+      # 어떤 예외 타입으로 바뀌든 영향받지 않는다 — "String이 아니면 유효한
+      # 토큰이 아니다"라고 여기서 직접 말하는 쪽이 서드파티 gem의 오늘 시점
+      # 예외 타입에 기대는 것보다 정확하다.
+      raise InvalidToken, "token must be a string" unless token.is_a?(String)
+
       JWT.decode(token, config.secret_key, true, {
         algorithm: ALGORITHM,
         iss: config.issuer, verify_iss: true,
