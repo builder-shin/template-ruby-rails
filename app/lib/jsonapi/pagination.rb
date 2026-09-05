@@ -10,7 +10,6 @@ module Jsonapi
   # probe 조회는 `QueryParser`가 하고, 여기는 그 결과로 scope를 자르고
   # 링크를 조립하는 순수 함수만 담는다.
   module Pagination
-    DEFAULT_PAGE_SIZE = 20
     MAX_PAGE_SIZE = 100
     MAX_SQL_INTEGER = (2**63) - 1
 

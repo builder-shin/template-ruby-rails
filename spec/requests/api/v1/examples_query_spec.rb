@@ -340,6 +340,13 @@ RSpec.describe "Example JSON:API query contract", type: :request do
       end
     end
 
+    # decoded_link_query는 Hash로 모으므로 순서에는 눈이 멀다 — 여기서는 와이어 그대로의
+    # 키 순서(보존된 파라미터가 원래 순서를 유지한 채 → page[totals] → page[number] →
+    # page[size])를 정본과 맞춰 고정한다.
+    expect(URI.decode_www_form(URI.parse(links.fetch("next")).query).map(&:first)).to eq(
+      %w[filter[status][in] sort include page[totals] page[number] page[size]]
+    )
+
     first_page = request_document("page[number]=1&page[size]=4")
     expect(first_page.dig("links", "prev")).to be_nil
     expect(first_page.dig("links", "next")).to be_nil
@@ -604,6 +611,11 @@ RSpec.describe "Example JSON:API pagination contract", type: :request do
     links.each_value do |link|
       expect(decoded_link_query(link)).to include("page[totals]" => "true")
     end
+
+    # decoded_link_query는 Hash로 모으므로 순서에는 눈이 멀다 — 여기서는 와이어 그대로의
+    # 키 순서(preserved → page[totals] → page[number] → page[size])를 정본과 맞춰 고정한다.
+    expect(URI.decode_www_form(URI.parse(links.fetch("next")).query).map(&:first))
+      .to eq(%w[page[totals] page[number] page[size]])
   end
 
   it "decides next from a probe row rather than a count" do
