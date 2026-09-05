@@ -23,13 +23,6 @@ services:
       timeout: 3s
       retries: 10
 
-  auth-stub:
-    image: wiremock/wiremock:3.13.1
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./docker/wiremock:/home/wiremock:ro
-
   migrate:
     build:
       context: .
@@ -42,7 +35,6 @@ services:
       DEV_DATABASE_USERNAME: postgres
       DEV_DATABASE_PASSWORD: postgres
       DEV_DATABASE_NAME: template_development
-      AUTH_SERVICE_URL: http://auth-stub:8080
       # JWT_SECRET_KEY는 코드에 기본값이 없다(config/initializers/auth.rb) — 로컬
       # compose 스택이 뜨려면 여기서 명시해야 한다. 운영 값이 아니다.
       JWT_SECRET_KEY: docker-compose-dev-only-jwt-secret-key-do-not-use-in-production
@@ -67,8 +59,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      auth-stub:
-        condition: service_started
 
   worker:
     build:

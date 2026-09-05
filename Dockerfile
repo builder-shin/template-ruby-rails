@@ -46,8 +46,7 @@ ENV RAILS_ENV=production \
     BUNDLE_DEPLOYMENT=1 \
     BUNDLE_WITHOUT="development:test" \
     SECRET_KEY_BASE=dummy_for_asset_precompilation \
-    DATABASE_HOST=localhost \
-    AUTH_SERVICE_URL=http://auth.invalid
+    DATABASE_HOST=localhost
 
 RUN bundle install --jobs 4 --retry 3
 
