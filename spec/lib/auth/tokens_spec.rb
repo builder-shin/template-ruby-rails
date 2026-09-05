@@ -71,6 +71,19 @@ RSpec.describe Auth::Tokens do
       expect(claims.jti).to eq(session_id)
     end
 
+    it "normalizes an uppercase jti to lowercase (팀장 ruling: Auth::Tokens에서 정규화)" do
+      # 정본은 UUID(raw_jti)로 파싱해 반환해서 대소문자가 타입에서 공짜로 사라진다.
+      # Ruby의 jti는 그냥 String이라 여기서 명시적으로 낮추지 않으면 대문자로
+      # create된 토큰이 대문자 그대로 왕복해서, Ruby String `==`로 claims.jti를
+      # 비교하는 자리(세션 id 대조 등)가 어긋날 수 있다.
+      uppercase_jti = "5614FBF9-3B37-4B5A-9C3D-2B6E4E1A7C9A"
+      token = described_class.create(SecureRandom.uuid, type: "refresh", jti: uppercase_jti)
+
+      claims = described_class.decode(token, expected_type: "refresh")
+
+      expect(claims.jti).to eq(uppercase_jti.downcase)
+    end
+
     it "honors an explicit now: and derives iat/exp from it using the configured lifetime" do
       # 실제 "현재"에 가깝되 정수 초로 미리 자른다 — JWT는 정수 epoch초만 담으므로
       # now:에 마이크로초가 남아 있으면 왕복 후 비교에서 어긋난다. 먼 과거로

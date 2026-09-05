@@ -154,7 +154,15 @@ module Auth
 
       Claims.new(
         sub: sub,
-        jti: raw_jti,
+        # 정본은 UUID(raw_jti)로 파싱해 반환하고, 그 UUID를 문자열화하면 항상
+        # 소문자다 — 대소문자 무관이 타입에서 공짜로 따라온다. Ruby에는 그런 타입이
+        # 없고 raw_jti는 그냥 String이라, 여기서 downcase하지 않으면
+        # create(jti: "5614FBF9-...")가 대문자를 그대로 왕복시킨다. Postgres uuid
+        # 컬럼은 16바이트로 저장돼 DB 조회는 대소문자와 무관하지만, claims.jti를
+        # Ruby String으로 직접 비교하는 자리(세션 id 대조, 로그 상관관계)는 그렇지
+        # 않다 — 여기서 한 번 정규화해 두면 그 이후의 모든 소비자가 매번 기억하지
+        # 않아도 정본과 같은 보장을 받는다.
+        jti: raw_jti.downcase,
         type: raw_type,
         iat: Time.at(raw_iat).utc,
         exp: Time.at(raw_exp).utc,
