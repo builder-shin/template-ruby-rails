@@ -19,11 +19,13 @@ RSpec.describe "GET /api/v1/users/me", type: :request do
     get path, headers: jsonapi_headers.merge(auth_bearer_headers)
 
     expect(response).to have_http_status(:ok)
-    # render jsonapi:(jsonapi-rails 렌더러)는 CrudActions#render_jsonapi_payload와
-    # 달리 Content-Type을 문자열로 직접 대입하지 않고 Rails의 표준 content_type=
-    # 경로를 타서 charset이 붙는다 — 실측: "application/vnd.api+json; charset=utf-8".
-    # JSONAPI_MEDIA_TYPE과 정확히 eq하면 charset 때문에 항상 실패한다.
-    expect(response.headers.fetch("Content-Type")).to start_with(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
+    # `eq`다. 예전에는 `start_with`였는데, 그 단언은 파라미터 없는 값과
+    # "application/vnd.api+json; charset=utf-8"을 **둘 다 통과시켜** 이 자리가
+    # 구별해야 할 두 세계를 하나로 만들었다. JSON:API 1.1 §5.1은 응답 미디어
+    # 타입에 파라미터를 금지하고, 이 API 자신도 그 값을 요청에 실으면 415로
+    # 거절한다 — JsonapiNegotiation이 응답 쪽에서 파라미터를 떼는 이유다.
+    # 전 라우트를 훑는 짝 스펙: spec/requests/api/v1/jsonapi_response_media_type_spec.rb
+    expect(response.headers.fetch("Content-Type")).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
     document = parsed_body
     resource = document.fetch("data")
     attributes = resource.fetch("attributes")
