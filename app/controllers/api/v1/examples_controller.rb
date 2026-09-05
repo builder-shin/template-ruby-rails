@@ -3,6 +3,8 @@
 module Api
   module V1
     class ExamplesController < ApiController
+      include JsonapiAuthentication
+
       RESOURCE_UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
       private_constant :RESOURCE_UUID
 
@@ -19,7 +21,12 @@ module Api
       private_constant :PROTECTED_WRITE_ACTIONS
 
       skip_before_action :set_current_user
-      before_action :authenticate_write!, only: PROTECTED_WRITE_ACTIONS
+      # 정본에서 확인한 사실: 쓰기 라우트는 get_current_active_user를 쓴다 —
+      # authenticate_active_user!가 그 갈래다(JsonapiAuthentication 참고). 예전에는
+      # 여기서 set_current_user(AuthServiceClient 쿠키 세션)를 부른 뒤
+      # require_active_user!로 활성만 검사했다; 이제 Bearer access token 자체를
+      # 검증하고 User를 조회하는 것까지 authenticate_active_user! 하나가 한다.
+      before_action :authenticate_active_user!, only: PROTECTED_WRITE_ACTIONS
       skip_before_action :_set_model, only: %i[update destroy]
 
       def allowed_includes
@@ -27,11 +34,6 @@ module Api
       end
 
       private
-
-      def authenticate_write!
-        set_current_user
-        require_active_user!
-      end
 
       def serializer_class
         ExampleSerializer

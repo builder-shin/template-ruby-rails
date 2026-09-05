@@ -61,3 +61,12 @@ en:
       AUTH_SERVICE_UNAVAILABLE:
         title: "Authentication service unavailable"
         detail: "The authentication service is temporarily unavailable."
+      INVALID_TOKEN:
+        title: "Invalid token"
+        detail: "The authentication token is invalid."
+      TOKEN_EXPIRED:
+        title: "Token expired"
+        detail: "The authentication token has expired."
+      USER_INACTIVE:
+        title: "User inactive"
+        detail: "Your account is inactive."

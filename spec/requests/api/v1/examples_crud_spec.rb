@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe "Example CRUD", type: :request do
   let(:collection_path) { "/api/v1/examples" }
 
-  before { mock_authenticated_user }
+  before { mock_bearer_user }
 
   def resource_path(example_or_id)
     "#{collection_path}/#{example_or_id.respond_to?(:id) ? example_or_id.id : example_or_id}"
@@ -23,7 +23,7 @@ RSpec.describe "Example CRUD", type: :request do
       method,
       path,
       params: body&.to_json,
-      headers: jsonapi_headers(cookie: "valid-session")
+      headers: jsonapi_headers.merge(auth_bearer_headers)
     )
   end
 

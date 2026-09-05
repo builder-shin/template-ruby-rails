@@ -40,7 +40,7 @@ RSpec.configure do |config|
   operation = lambda do |summary, response_schema = nil, status: "200", protected: false, request_schema: nil|
     response = response_schema ? document_response.call(response_schema) : { description: "No Content" }
     definition = { summary: summary, responses: { status => response } }
-    definition[:security] = [ { cookieAuth: [] } ] if protected
+    definition[:security] = [ { BearerAuth: [] } ] if protected
     definition[:requestBody] = request_body.call(request_schema) if request_schema
     definition
   end
@@ -142,13 +142,47 @@ RSpec.configure do |config|
         "/api/v1/tags/{id}" => {
           parameters: [ id_parameter ],
           get: operation.call("Tag 조회", "ExampleTagDocument")
+        },
+        "/api/v1/users/me" => {
+          get: operation.call("내 프로필 조회", "UserDocument", protected: true)
         }
       },
       components: {
         securitySchemes: {
-          cookieAuth: { type: "apiKey", in: "cookie", name: "session_web" }
+          BearerAuth: { type: "http", scheme: "bearer" }
         },
         schemas: {
+          UserIdentifier: identifier_schema.call("users"),
+          UserAttributes: {
+            type: "object",
+            required: %w[email isActive createdAt updatedAt],
+            properties: {
+              email: { type: "string", format: "email" },
+              isActive: { type: "boolean" },
+              createdAt: { type: "string", format: "date-time", readOnly: true },
+              updatedAt: { type: "string", format: "date-time", readOnly: true }
+            }
+          },
+          UserResource: {
+            allOf: [
+              { "$ref" => "#/components/schemas/UserIdentifier" },
+              {
+                type: "object",
+                required: %w[attributes links],
+                properties: {
+                  attributes: { "$ref" => "#/components/schemas/UserAttributes" },
+                  links: { type: "object" }
+                }
+              }
+            ]
+          },
+          UserDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: { "$ref" => "#/components/schemas/UserResource" }
+            }
+          },
           ExampleIdentifier: identifier_schema.call("examples"),
           ExampleCategoryIdentifier: identifier_schema.call("exampleCategories"),
           ExampleTagIdentifier: identifier_schema.call("exampleTags"),

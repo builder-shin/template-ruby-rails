@@ -25,6 +25,9 @@ RSpec.describe "JSON:API errors", type: :request do
     AUTHENTICATION_REQUIRED
     FORBIDDEN
     AUTH_SERVICE_UNAVAILABLE
+    INVALID_TOKEN
+    TOKEN_EXPIRED
+    USER_INACTIVE
   ].freeze
 
   def expect_error(status:, code:)

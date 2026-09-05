@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe "Example action query allowlists", type: :request do
   let(:collection_path) { "/api/v1/examples" }
 
-  before { mock_authenticated_user }
+  before { mock_bearer_user }
 
   def resource_path(example)
     "#{collection_path}/#{example.id}"
@@ -86,7 +86,7 @@ RSpec.describe "Example action query allowlists", type: :request do
           method,
           "#{path}?fields[examples]=title",
           params: body&.to_json,
-          headers: jsonapi_headers(cookie: "valid-session")
+          headers: jsonapi_headers.merge(auth_bearer_headers)
         )
 
         expect_query_error("INVALID_QUERY_PARAMETER", "fields[examples]")
@@ -133,7 +133,7 @@ RSpec.describe "Example action query allowlists", type: :request do
           method,
           "#{path}?fields[examples]=title",
           params: body&.to_json,
-          headers: jsonapi_headers(cookie: "valid-session")
+          headers: jsonapi_headers.merge(auth_bearer_headers)
         )
 
         expect_query_error("INVALID_QUERY_PARAMETER", "fields[examples]")
