@@ -457,6 +457,7 @@ components:
       properties:
         refreshToken:
           type: string
+          minLength: 1
     RefreshTokenDocument:
       type: object
       required:

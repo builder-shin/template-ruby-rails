@@ -236,11 +236,15 @@ RSpec.configure do |config|
               }
             }
           },
+          # minLength: 1은 정본 `RawRefreshToken = Annotated[str, Field(min_length=1)]`이
+          # OpenAPI로 내보내는 것과 같다(정본 스키마를 직접 덤프해 확인:
+          # {"minLength": 1, "type": "string"}). AuthController#refresh_token!이 실제로
+          # 강제하므로 문서와 구현이 어긋나지 않는다 — 빈 문자열은 422다.
           RefreshTokenAttributes: {
             type: "object",
             required: [ "refreshToken" ],
             properties: {
-              refreshToken: { type: "string" }
+              refreshToken: { type: "string", minLength: 1 }
             }
           },
           RefreshTokenDocument: {

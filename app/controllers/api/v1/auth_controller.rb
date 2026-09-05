@@ -41,6 +41,11 @@ module Api
       EMAIL_UNIQUE_INDEX = "index_users_on_email"
       private_constant :EMAIL_UNIQUE_INDEX
 
+      # users.email 컬럼(varchar(254))과 정본 AuthEmail(Field(max_length=254))에
+      # 맞춘 상한. normalized_email!이 정규화 전후 **양쪽**에 이 값을 건다.
+      EMAIL_MAX_LENGTH = 254
+      private_constant :EMAIL_MAX_LENGTH
+
       # 가입. 스펙 6.7 — 중복은 사전 조회로 막지 않는다. User#email에는
       # uniqueness 검증이 없다(app/models/user.rb 참고) — DB 유니크 인덱스가
       # INSERT 시점에 막게 두고, 그 위반(ActiveRecord::RecordNotUnique)만 여기서
@@ -49,7 +54,7 @@ module Api
       # 상위(JsonapiErrors)의 기본 RESOURCE_CONFLICT 처리로 넘긴다.
       def register
         attributes = parse_write_data!(expected_type: "users", allowed_attributes: REGISTER_ATTRIBUTES)
-        email = normalize_email(bounded_string!(attributes, "email", min: 1, max: 254))
+        email = normalized_email!(attributes)
         password = bounded_string!(attributes, "password", min: 12, max: 128)
 
         payload = nil
@@ -90,7 +95,7 @@ module Api
       #      잠그고 활성까지 확인한 뒤이므로 그 계약과 정확히 맞는다.
       def login
         attributes = parse_write_data!(expected_type: "authCredentials", allowed_attributes: LOGIN_ATTRIBUTES)
-        email = normalize_email(bounded_string!(attributes, "email", min: 1, max: 254))
+        email = normalized_email!(attributes)
         password = bounded_string!(attributes, "password", min: 12, max: 128)
 
         payload = nil
@@ -119,10 +124,11 @@ module Api
       # JsonApiError로 바꿔 올린다.
       def refresh
         attributes = parse_write_data!(expected_type: "refreshTokens", allowed_attributes: REFRESH_ATTRIBUTES)
+        raw_token = refresh_token!(attributes)
 
         outcome = nil
         ActiveRecord::Base.transaction do
-          outcome = Auth::RefreshSessions.rotate(attributes["refreshToken"])
+          outcome = Auth::RefreshSessions.rotate(raw_token)
         end
 
         raise JsonApiError.new(status: outcome.status, code: outcome.code) if outcome.is_a?(Auth::RefreshSessions::Failure)
@@ -135,10 +141,11 @@ module Api
       # Failure를 오류로 바꿔 올린다.
       def logout
         attributes = parse_write_data!(expected_type: "refreshTokens", allowed_attributes: REFRESH_ATTRIBUTES)
+        raw_token = refresh_token!(attributes)
 
         outcome = nil
         ActiveRecord::Base.transaction do
-          outcome = Auth::RefreshSessions.logout(attributes["refreshToken"])
+          outcome = Auth::RefreshSessions.logout(raw_token)
         end
 
         raise JsonApiError.new(status: outcome.status, code: outcome.code) if outcome
@@ -154,13 +161,9 @@ module Api
       # attributes(ActionController::Parameters, 원시 문자열 값)를 돌려준다 —
       # email/password 같은 값 자체의 검증(길이 등)은 각 액션이 이어서 한다.
       #
-      # refreshToken은 여기서 String인지·비어 있지 않은지 검사하지 않는다.
-      # `{"refreshToken": 123}`처럼 문자열이 아닌 값도, nil도 그대로
-      # Auth::RefreshSessions.rotate/logout에 넘어간다 — Auth::Tokens.decode_payload가
-      # `token.is_a?(String)`이 아니면 InvalidToken을 던지고, 그 모듈이 이미 그걸
-      # Failure(401, "INVALID_TOKEN")으로 바꿔 반환하므로(refresh_sessions_spec.rb의
-      # "rejects nil and an empty string without raising" 참고) 여기서 또 검사하면
-      # 같은 판정을 두 곳에서 하게 된다.
+      # 값 자체의 검증(refreshToken이 비어 있지 않은 문자열인가, email이 형식·길이를
+      # 지키는가)은 여기가 아니라 각 액션이 부르는 refresh_token!/normalized_email!이
+      # 한다 — 이 메서드는 "문서 모양"만 본다.
       def parse_write_data!(expected_type:, allowed_attributes:)
         data = params[:data]
         raise JsonApiError.new(status: 400, code: "INVALID_JSONAPI_DOCUMENT") unless data.is_a?(ActionController::Parameters)
@@ -229,15 +232,67 @@ module Api
       # 제한을 넘는 title을 보내면 정확히 이 코드(422 VALIDATION_ERROR, pointer
       # /data/attributes/title)가 나온다 — 그 값을 그대로 고정한다.
       #
-      # 존재 자체를 검증하지 않고 downstream에 맡길 수 없는 이유(refreshToken과
-      # 다른 점): email은 정규화(strip)에서, password는 Auth::Passwords.verify_password에서
-      # nil이 오면 예외 없이 그대로 죽는다(각각 NoMethodError/TypeError) — 이
-      # 컨트롤러가 직접 막아야 500을 피한다.
+      # 존재 자체를 downstream에 맡길 수 없는 이유: email은 정규화(strip)에서,
+      # password는 Auth::Passwords.verify_password에서 nil이 오면 예외 없이 그대로
+      # 죽는다(각각 NoMethodError/TypeError) — 이 컨트롤러가 직접 막아야 500을
+      # 피한다. refreshToken은 downstream이 안전하게 처리하지만 그래도 여기서
+      # 막는다(refresh_token! 코멘트 참고) — 상태 코드가 정본과 갈리기 때문이다.
       def bounded_string!(attributes, name, min:, max:)
         value = attributes[name]
         return value if value.is_a?(String) && value.length.between?(min, max)
 
+        invalid_attribute!(name)
+      end
+
+      def invalid_attribute!(name)
         raise JsonApiError.new(status: 422, code: "VALIDATION_ERROR", source: { pointer: "/data/attributes/#{name}" })
+      end
+
+      # 이메일에 대한 검증 전부를 여기 모은다. **순서가 계약이다:**
+      #
+      #   1. 원본에 길이 상한을 건다 — 폴딩이 길이를 늘리므로(3번) 정규화 전에도
+      #      상한을 둬서 폴딩 폭발 자체를 미리 자른다.
+      #   2. 정규화한다(strip + 전체 유니코드 케이스 폴딩).
+      #   3. **정규화 결과에 다시** 같은 상한을 건다. 이것이 진짜 계약이다 —
+      #      users.email은 varchar(254)이고 INSERT되는 값은 정규화 결과이지
+      #      원본이 아니다. `String#downcase(:fold)`는 길이를 늘린다("ß" → "ss",
+      #      "ﬁ" → "fi"). 실측: `"a"*230 + "ß"*11 + "@example.com"`은 원본 253자로
+      #      1번을 통과하지만 폴딩 후 264자가 되어 컬럼을 넘고, Postgres의
+      #      StringDataRightTruncation이 JsonapiErrors의 rescue_from StandardError에
+      #      걸려 **무인증 공개 라우트가 500**을 낸다. 검사 대상을 DB에 들어가는
+      #      값과 같게 맞추면 이 갈래가 사라진다.
+      #   4. 형식을 본다. 검사 대상 역시 **정규화 결과**다 — 저장·조회되는 값이
+      #      그것이고, 정본도 형식 검증을 통과한 값을 뒤이어 casefold해 쓴다.
+      #      (예: "aß@example.com"의 폴딩 결과 "ass@example.com"은 ASCII라 아래
+      #      정규식을 통과한다. 원본에 걸면 폴딩이 ASCII를 만들어 내는 이 경우를
+      #      부당하게 거절한다.) 정본은 EmailStr(email-validator)이라 경계값이
+      #      완전히 같지는 않다 — 남는 차이는 태스크 보고서에 목록으로 적었다.
+      #      새 gem 없이 Ruby 표준 라이브러리의 URI::MailTo::EMAIL_REGEXP를 쓴다.
+      def normalized_email!(attributes)
+        raw = bounded_string!(attributes, "email", min: 1, max: EMAIL_MAX_LENGTH)
+        email = normalize_email(raw)
+        invalid_attribute!("email") unless email.length.between?(1, EMAIL_MAX_LENGTH)
+        invalid_attribute!("email") unless email.match?(URI::MailTo::EMAIL_REGEXP)
+
+        email
+      end
+
+      # refreshToken은 "비어 있지 않은 문자열"이어야 한다 — 정본
+      # `RawRefreshToken = Annotated[str, Field(min_length=1)]` + JsonApiWriteSchema의
+      # `strict=True`(app/jsonapi/naming.py)와 같은 계약이다. 누락·null·빈 문자열·
+      # 비문자열은 서명 검증에 도달하기 전의 **문서 형태 오류**이므로 401이 아니라
+      # 422 VALIDATION_ERROR다(정본에서 실측: 네 경우 전부 loc이
+      # ("data","attributes","refreshToken")인 RequestValidationError). 형태는
+      # 맞는데 유효하지 않은 토큰은 그대로 401이다 — 그 경계를 흐리지 않는다.
+      # 상한은 두지 않는다(정본에 min_length만 있고 max_length가 없다).
+      #
+      # Auth::Tokens.decode_payload의 `token.is_a?(String)` 가드는 그대로 둔다 —
+      # 이 컨트롤러 말고도 그 모듈을 부르는 자리가 있을 수 있는 심층 방어다.
+      def refresh_token!(attributes)
+        value = attributes["refreshToken"]
+        invalid_attribute!("refreshToken") unless value.is_a?(String) && !value.empty?
+
+        value
       end
 
       # 저장 직전(register)과 조회 직전(login) 둘 다 이 메서드 하나만 거친다 —
@@ -261,11 +316,17 @@ module Api
       # 네 액션 전부가 "쓰기" 응답이라 CrudActions의 write 경로(create/update 등)와
       # 모양을 맞추는 쪽을 택했다 — UsersController#me(render jsonapi:, GET)와는
       # 다르다.
+      #
+      # `payload.as_json`을 거치는 이유는 CrudActions#render_jsonapi_payload의
+      # 코멘트와 같다 — `JSON.generate`만으로는 Time이 `to_s`를 타서 ISO-8601이
+      # 아닌 문자열이 나가고, 그러면 register의 201이 내는 createdAt과
+      # GET /api/v1/users/me가 내는 같은 필드의 형식이 갈린다. 두 곳을 같이
+      # 고쳐야 한다 — 한쪽만 고치면 갈림이 그대로 남는다.
       def render_jsonapi_document(payload, status:, location: nil)
         response.status = status
         response.headers["Content-Type"] = JSONAPI::MEDIA_TYPE
         response.headers["Location"] = location if location
-        self.response_body = JSON.generate(payload)
+        self.response_body = JSON.generate(payload.as_json)
       end
     end
   end

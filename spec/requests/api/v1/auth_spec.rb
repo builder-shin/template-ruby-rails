@@ -166,6 +166,71 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/email")
     end
 
+    # 정규화는 길이를 **늘린다** — `String#downcase(:fold)`(전체 유니코드 케이스
+    # 폴딩)가 "ß"를 "ss"로 바꾼다. 길이 상한을 원본에만 걸면 이 입력은 상한을
+    # 통과하고, 폴딩된 264자가 varchar(254)인 users.email에 INSERT되어 Postgres의
+    # StringDataRightTruncation → rescue_from StandardError → **500**이 된다.
+    # 무인증 공개 라우트가 요청 본문 하나로 500을 내는 갈래였다.
+    #
+    # 이 테스트가 형식 검증(아래 "rejects a syntactically invalid email")과
+    # 우연히 같은 세계를 보지 않는다는 점이 중요하다: 폴딩 결과는 순수 ASCII라
+    # URI::MailTo::EMAIL_REGEXP를 **통과한다**. 즉 이 입력을 거절하는 유일한
+    # 이유는 "정규화 후 길이"뿐이다.
+    it "rejects an email that only exceeds 254 characters after case folding with 422, not 500" do
+      raw = "#{'a' * 230}#{'ß' * 11}@example.com"
+      folded = raw.strip.downcase(:fold)
+      aggregate_failures do
+        expect(raw.length).to eq(253)
+        expect(folded.length).to eq(264)
+        expect(folded).to match(URI::MailTo::EMAIL_REGEXP)
+      end
+
+      register!(email: raw, password: password)
+
+      expect_error(status: 422, code: "VALIDATION_ERROR")
+      expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/email")
+    end
+
+    # 정본은 `AuthEmail = Annotated[EmailStr, Field(max_length=254)]`로 형식까지
+    # 본다 — 아래 세 값 전부 422다(정본의 pydantic 스키마를 직접 실행해 실측).
+    # swagger_helper.rb도 email에 `format: "email"`을 이미 문서화해 두었다.
+    it "rejects a syntactically invalid email with 422 VALIDATION_ERROR" do
+      aggregate_failures do
+        [ "not-an-email", "a b@c d", "a" ].each do |bad|
+          expect do
+            register!(email: bad, password: password)
+          end.not_to change(User, :count)
+          expect_error(status: 422, code: "VALIDATION_ERROR")
+          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/email")
+        end
+      end
+    end
+
+    # 쓰기 응답(JSON.generate)과 읽기 응답(render jsonapi:)이 같은 자원의 같은
+    # 필드를 서로 다른 형식으로 내던 결함의 가드. `Time.iso8601` 파싱 성공만
+    # 단언하면 정밀도 차이(.418 유무)를 못 잡으므로 **문자열이 정확히 같은지**를
+    # 본다. 실측(고치기 전): 201이 "2026-09-05 23:49:08 +0900",
+    # GET /users/me가 "2026-09-05T23:49:08.639+09:00" — 전자는 Time.iso8601이
+    # ArgumentError를 낸다.
+    it "renders createdAt/updatedAt exactly as the read path does for the same user" do
+      register!(email: "isotime@example.com", password: password)
+      expect(response).to have_http_status(:created)
+      written = parsed_body.fetch("data").fetch("attributes")
+
+      login!(email: "isotime@example.com", password: password)
+      access_token = parsed_body.dig("data", "attributes", "accessToken")
+
+      get "/api/v1/users/me", headers: jsonapi_headers.merge(auth_bearer_headers(access_token))
+
+      expect(response).to have_http_status(:ok)
+      read = parsed_body.fetch("data").fetch("attributes")
+      aggregate_failures do
+        expect(written.fetch("createdAt")).to eq(read.fetch("createdAt"))
+        expect(written.fetch("updatedAt")).to eq(read.fetch("updatedAt"))
+        expect { Time.iso8601(written.fetch("createdAt")) }.not_to raise_error
+      end
+    end
+
     it "rejects a non-JSON:API document shape (data not an object) with 400 INVALID_JSONAPI_DOCUMENT" do
       post "/api/v1/auth/register", params: { data: "oops" }.to_json, headers: jsonapi_headers
 
@@ -261,25 +326,35 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect_error(status: 401, code: "INVALID_CREDENTIALS")
     end
 
-    # 이 테스트가 없으면 dummy_hash 호출 제거가 어떤 기능 테스트로도 안
-    # 잡힌다(타이밍 부작용은 상태 코드 단언으로는 원천적으로 못 본다) — 최소한
-    # "호출은 됐다"는 구조적 사실만이라도 고정해 둔다. 실제 시간 동등성은
-    # spec/lib/auth/passwords_spec.rb가 Auth::Passwords 레벨에서 이미 고정한다.
-    it "verifies against Auth::Passwords.dummy_hash even when the email does not exist" do
-      expect(Auth::Passwords).to receive(:dummy_hash).and_call_original
+    # 타이밍 오라클 방어의 유일한 가드. "dummy_hash가 호출됐다"만 단언하면
+    # 속 빈 가드가 된다 — dummy_hash는 캐시된 상수를 돌려주는 사실상 공짜
+    # 호출이라, 그 호출은 남긴 채 verify_password만 건너뛰면 argon2 비용(~30ms)이
+    # 존재하는 계정에서만 발생해 응답 시간이 계정 존재를 알려 주는데도 그런
+    # 테스트는 통과한다(실측: 그 뮤테이션이 0 failures로 생존했다).
+    #
+    # 그래서 **어떤 해시가 실제로 verify_password에 들어갔는지**를 단언한다.
+    # `and_wrap_original`로 감싸기만 하고 원본을 그대로 호출하므로 검증 대상
+    # 구현이 스텁으로 대체되지 않는다. 정본의
+    # test_login_uses_dummy_hash_and_hides_email_existence
+    # (`assert verified_hashes == [DUMMY_PASSWORD_HASH, user.password_hash]`)와
+    # 같은 층위다.
+    it "runs argon2 against the dummy hash for an unknown email and against the stored hash for a real one" do
+      register!(email: "timing@example.com", password: "correct-horse-battery")
+      user = User.find_by!(email: "timing@example.com")
+      dummy_hash = Auth::Passwords.dummy_hash
+      verified_hashes = []
+      allow(Auth::Passwords).to receive(:verify_password).and_wrap_original do |original, candidate, hash|
+        verified_hashes << hash
+        original.call(candidate, hash)
+      end
 
       login!(email: "nobody-at-all@example.com", password: "whatever-password")
-
       expect_error(status: 401, code: "INVALID_CREDENTIALS")
-    end
 
-    it "does not call dummy_hash when the account exists" do
-      register!(email: "real2@example.com", password: "correct-horse-battery")
-      expect(Auth::Passwords).not_to receive(:dummy_hash)
-
-      login!(email: "real2@example.com", password: "correct-horse-battery")
-
+      login!(email: "timing@example.com", password: "correct-horse-battery")
       expect(response).to have_http_status(:ok)
+
+      expect(verified_hashes).to eq([ dummy_hash, user.password_hash ])
     end
 
     # 순서 테스트 2 (스펙 6.5) — 이것이 순서 계약의 진짜 가드다. 활성 여부를
@@ -302,14 +377,44 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect_error(status: 403, code: "USER_INACTIVE")
     end
 
-    # Step 3: 저장 직전(register)과 조회 직전(login)이 같은 정규화를 쓰지
-    # 않으면 가입한 이메일로 로그인이 안 되는 상태가 생긴다.
-    it "logs in with a normalized email even though registration used mixed case and surrounding whitespace" do
+    # 저장 직전(register)과 조회 직전(login)이 같은 정규화를 쓰지 않으면 가입한
+    # 이메일로 로그인이 안 되는 상태가 생긴다.
+    #
+    # **로그인 입력도 정규화되지 않은 형태로 보내는 것이 이 테스트의 핵심이다.**
+    # 여기에 이미 정규화된 값("mixed.case@example.com")을 보내면 login 쪽
+    # normalize_email이 있으나 없으나 결과가 같아져서 register 쪽만 증명하게
+    # 된다 — 실측: 그 형태에서는 login의 normalize_email을 지워도 0 failures였다.
+    # 실제 영향은 "소문자로 가입한 사용자가 모바일 자동 대문자화된
+    # User@Example.com으로 로그인하면 401"이다.
+    it "normalizes the email on both sides -- registration and login each accept unnormalized input" do
       register!(email: "  MiXed.Case@EXAMPLE.com  ", password: "correct-horse-battery")
+      expect(response).to have_http_status(:created)
 
-      login!(email: "mixed.case@example.com", password: "correct-horse-battery")
+      login!(email: " MIXED.case@Example.COM  ", password: "correct-horse-battery")
 
       expect(response).to have_http_status(:ok)
+    end
+
+    # register 쪽과 같은 이유(그쪽 코멘트 참고). login에도 같은 갈래가 있고,
+    # 정본이 register/login 양쪽에 같은 AuthEmail을 쓰므로 양쪽에 건다.
+    it "rejects an email that only exceeds 254 characters after case folding with 422, not 500" do
+      raw = "#{'a' * 230}#{'ß' * 11}@example.com"
+      expect(raw.strip.downcase(:fold).length).to eq(264)
+
+      login!(email: raw, password: "correct-horse-battery")
+
+      expect_error(status: 422, code: "VALIDATION_ERROR")
+      expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/email")
+    end
+
+    it "rejects a syntactically invalid email with 422 VALIDATION_ERROR" do
+      aggregate_failures do
+        [ "not-an-email", "a b@c d", "a" ].each do |bad|
+          login!(email: bad, password: "correct-horse-battery")
+          expect_error(status: 422, code: "VALIDATION_ERROR")
+          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/email")
+        end
+      end
     end
 
     it "rejects data.type other than authCredentials with 409 TYPE_MISMATCH" do
@@ -379,15 +484,31 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect_error(status: 401, code: "INVALID_TOKEN")
     end
 
-    # 팀장 메모: Auth::Tokens.decode_payload가 문자열이 아닌 토큰을 InvalidToken으로
-    # 거절하고, Auth::RefreshSessions가 그걸 이미 Failure(401, INVALID_TOKEN)로
-    # 바꿔 반환한다 — 컨트롤러가 refreshToken의 타입을 따로 검사하지 않아도
-    # 500 대신 깨끗한 401이 나오는지 확인한다.
-    it "returns 401 INVALID_TOKEN, not 500, when refreshToken is not a string" do
-      post "/api/v1/auth/refresh", params: { data: { type: "refreshTokens", attributes: { refreshToken: 123 } } }.to_json,
-                                    headers: jsonapi_headers
+    # 형태 오류(누락·null·빈 문자열·비문자열)와 "형태는 맞지만 유효하지 않은
+    # 토큰"의 경계. 앞쪽은 서명 검증에 **도달하기 전**의 문서 형태 오류라 422이고
+    # (정본 `RawRefreshToken = Annotated[str, Field(min_length=1)]` + strict=True를
+    # 직접 실행해 실측 — 네 경우 전부 loc이 ("data","attributes","refreshToken")),
+    # 뒤쪽은 위의 "garbage input" 테스트가 고정하는 401이다. 둘을 같은 상태
+    # 코드로 뭉개면 클라이언트가 "내가 보낸 문서가 틀렸다"와 "토큰이 만료·폐기
+    # 됐으니 다시 로그인해야 한다"를 구분하지 못한다.
+    it "returns 422 VALIDATION_ERROR when refreshToken is missing, null, empty, or not a string" do
+      bodies = [
+        { data: { type: "refreshTokens", attributes: { refreshToken: nil } } },
+        { data: { type: "refreshTokens", attributes: { refreshToken: "" } } },
+        { data: { type: "refreshTokens", attributes: { refreshToken: 123 } } },
+        { data: { type: "refreshTokens", attributes: { refreshToken: [ 1, 2 ] } } },
+        { data: { type: "refreshTokens", attributes: {} } },
+        { data: { type: "refreshTokens" } }
+      ]
 
-      expect_error(status: 401, code: "INVALID_TOKEN")
+      aggregate_failures do
+        bodies.each do |body|
+          post "/api/v1/auth/refresh", params: body.to_json, headers: jsonapi_headers
+
+          expect_error(status: 422, code: "VALIDATION_ERROR")
+          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/refreshToken")
+        end
+      end
     end
 
     it "rejects data.type other than refreshTokens with 409 TYPE_MISMATCH" do
@@ -399,14 +520,15 @@ RSpec.describe "Api::V1::Auth", type: :request do
 
     # 이 describe 밖의 모든 refresh 테스트는 RSpec의 기본 트랜잭션 픽스처
     # (use_transactional_tests = true) 아래서 돈다 — 매 예제가 이미 RSpec이 열어
-    # 둔 트랜잭션 "안"이라 `ActiveRecord::Base.connection.transaction_open?`이
-    # 컨트롤러가 스스로 트랜잭션을 여는지와 무관하게 항상 true다
-    # (refresh_sessions_spec.rb의 "F1" 코멘트가 말하는 것과 같은 함정). 실측:
-    # AuthController#refresh에서 `ActiveRecord::Base.transaction do ... end`
-    # 래핑을 지워도 위의 6개 테스트는 전부 그대로 통과했다 — 그 상태로는 이
-    # 파일이 컨트롤러가 실제로 트랜잭션을 여는지 전혀 증명하지 못한다는 뜻이다.
-    # 여기서만 픽스처를 끄고 실제 커넥션으로 검증한다.
-    describe "opens its own transaction (independent of RSpec's ambient one)" do
+    # 둔 트랜잭션 "안"이라 컨트롤러가 여는 `ActiveRecord::Base.transaction`은
+    # 바깥 트랜잭션에 **합류**만 한다. 그래서 (a)
+    # `ActiveRecord::Base.connection.transaction_open?`이 컨트롤러가 스스로
+    # 트랜잭션을 여는지와 무관하게 항상 true이고, (b) 그 블록 안에서 예외가 나도
+    # **실제 ROLLBACK이 일어나지 않는다**(refresh_sessions_spec.rb의 "F1" 코멘트가
+    # 말하는 것과 같은 함정). 실측: 래핑을 지워도, 그리고 raise를 트랜잭션 안으로
+    # 옮겨도 이 describe 밖의 테스트는 전부 그대로 통과했다. 여기서만 픽스처를
+    # 끄고 실제 커넥션으로 검증한다.
+    describe "runs against a real connection with no ambient RSpec transaction" do
       self.use_transactional_tests = false
 
       before do
@@ -429,6 +551,33 @@ RSpec.describe "Api::V1::Auth", type: :request do
         post "/api/v1/auth/refresh", params: refresh_token_body(old_token), headers: jsonapi_headers
 
         expect(response).to have_http_status(:ok)
+      end
+
+      # 컨트롤러 주석이 계약으로 선언한 것 — "Failure는 트랜잭션 블록 안에서
+      # 절대 올리지 않고, 블록을 빠져나와 커밋된 뒤에만 올린다" — 의 유일한
+      # 가드다. 재사용 감지(`Auth::RefreshSessions.rotate`)는 폐기된 토큰이
+      # 재생되면 그 사용자의 **활성 세션 전부**를 끊은 뒤에 Failure를 돌려준다.
+      # raise를 트랜잭션 안으로 옮기면 그 일괄 폐기까지 함께 롤백되어, 탈취된
+      # 토큰이 재생됐는데도 세션이 하나도 안 끊긴다 — 응답은 똑같은 401이라
+      # 상태 코드만 보는 테스트로는 원천적으로 구분되지 않는다. 그래서 DB를
+      # 직접 본다.
+      it "keeps every session of the user revoked after a rotated token is replayed" do
+        email = "replay-#{SecureRandom.hex(4)}@example.com"
+        register!(email: email, password: "correct-horse-battery")
+        login!(email: email, password: "correct-horse-battery")
+        replayed_token = parsed_body.dig("data", "attributes", "refreshToken")
+        login!(email: email, password: "correct-horse-battery")
+        user_id = User.find_by!(email: email).id
+
+        post "/api/v1/auth/refresh", params: refresh_token_body(replayed_token), headers: jsonapi_headers
+        expect(response).to have_http_status(:ok)
+        # 회전된 세션은 끊기고 새 세션이 생겼다 — 두 번째 로그인 세션과 함께 2개.
+        expect(RefreshSession.where(user_id: user_id, revoked_at: nil).count).to eq(2)
+
+        post "/api/v1/auth/refresh", params: refresh_token_body(replayed_token), headers: jsonapi_headers
+
+        expect_error(status: 401, code: "TOKEN_REVOKED")
+        expect(RefreshSession.where(user_id: user_id, revoked_at: nil).count).to eq(0)
       end
     end
   end
@@ -468,17 +617,33 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect_error(status: 401, code: "INVALID_TOKEN")
     end
 
-    it "returns 401 INVALID_TOKEN, not 500, when refreshToken is not a string" do
-      post "/api/v1/auth/logout", params: { data: { type: "refreshTokens", attributes: { refreshToken: [ 1, 2 ] } } }.to_json,
-                                   headers: jsonapi_headers
+    # refresh 쪽과 같은 경계(그쪽 코멘트 참고). 정본은 refresh/logout 양쪽에
+    # 같은 RefreshTokenDocument를 쓰므로 두 라우트가 같아야 한다.
+    it "returns 422 VALIDATION_ERROR when refreshToken is missing, null, empty, or not a string" do
+      bodies = [
+        { data: { type: "refreshTokens", attributes: { refreshToken: nil } } },
+        { data: { type: "refreshTokens", attributes: { refreshToken: "" } } },
+        { data: { type: "refreshTokens", attributes: { refreshToken: 123 } } },
+        { data: { type: "refreshTokens", attributes: { refreshToken: [ 1, 2 ] } } },
+        { data: { type: "refreshTokens", attributes: {} } },
+        { data: { type: "refreshTokens" } }
+      ]
 
-      expect_error(status: 401, code: "INVALID_TOKEN")
+      aggregate_failures do
+        bodies.each do |body|
+          post "/api/v1/auth/logout", params: body.to_json, headers: jsonapi_headers
+
+          expect_error(status: 422, code: "VALIDATION_ERROR")
+          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/refreshToken")
+        end
+      end
     end
 
-    # refresh와 같은 이유(위 "opens its own transaction" 코멘트 참고) — 이
+    # refresh와 같은 이유(위 "runs against a real connection" 코멘트 참고) — 이
     # describe 밖의 logout 테스트는 RSpec의 기본 트랜잭션 픽스처 아래서 돌아
-    # `AuthController#logout`이 스스로 트랜잭션을 여는지 증명하지 못한다.
-    describe "opens its own transaction (independent of RSpec's ambient one)" do
+    # `AuthController#logout`이 스스로 트랜잭션을 여는지도, Failure를 커밋 뒤에
+    # 올리는지도 증명하지 못한다.
+    describe "runs against a real connection with no ambient RSpec transaction" do
       self.use_transactional_tests = false
 
       before do
@@ -501,6 +666,27 @@ RSpec.describe "Api::V1::Auth", type: :request do
         post "/api/v1/auth/logout", params: refresh_token_body(token), headers: jsonapi_headers
 
         expect(response).to have_http_status(:no_content)
+      end
+
+      # refresh 쪽 "keeps every session ... replayed"와 같은 계약(Failure는 커밋
+      # 뒤에 올린다)의 logout 쪽 가드다. logout에는 재사용 감지가 없으므로
+      # (rotate만의 책임) Failure 직전에 상태를 바꾸는 갈래는 **만료** 하나다:
+      # `load_verified_session`이 만료된 세션을 폐기한 뒤 Failure(401,
+      # TOKEN_EXPIRED)를 돌려준다. raise를 트랜잭션 안으로 옮기면 그 폐기가
+      # 롤백되어, 만료된 토큰의 세션이 활성인 채로 DB에 남는다 — 응답은 똑같은
+      # 401이다.
+      it "keeps the expired session revoked after logout answers 401 TOKEN_EXPIRED" do
+        email = "expired-logout-#{SecureRandom.hex(4)}@example.com"
+        register!(email: email, password: "correct-horse-battery")
+        login!(email: email, password: "correct-horse-battery")
+        token = parsed_body.dig("data", "attributes", "refreshToken")
+        jti = Auth::Tokens.decode(token, expected_type: "refresh").jti
+        RefreshSession.find(jti).update_columns(expires_at: 1.minute.ago)
+
+        post "/api/v1/auth/logout", params: refresh_token_body(token), headers: jsonapi_headers
+
+        expect_error(status: 401, code: "TOKEN_EXPIRED")
+        expect(RefreshSession.find(jti).revoked_at).to be_present
       end
     end
   end
