@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_04_100001) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_05_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -71,7 +71,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_04_100001) do
     t.datetime "updated_at", null: false
     t.index ["category_id"], name: "index_examples_on_category_id"
     t.check_constraint "score >= 0 AND score <= 100", name: "examples_score_check"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'active'::character varying, 'archived'::character varying]::text[])", name: "examples_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'active'::character varying::text, 'archived'::character varying::text])", name: "examples_status_check"
+  end
+
+  create_table "refresh_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.uuid "replaced_by_id"
+    t.datetime "revoked_at"
+    t.string "token_hash", limit: 64, null: false
+    t.uuid "user_id", null: false
+    t.index ["replaced_by_id"], name: "index_refresh_sessions_on_replaced_by_id"
+    t.index ["token_hash"], name: "index_refresh_sessions_on_token_hash", unique: true
+    t.index ["user_id"], name: "index_refresh_sessions_on_user_id"
+  end
+
+  create_table "users", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email", limit: 254, null: false
+    t.boolean "is_active", default: true, null: false
+    t.text "password_hash", null: false
+    t.datetime "updated_at", null: false
+    t.index ["email"], name: "index_users_on_email", unique: true
   end
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
@@ -79,4 +100,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_04_100001) do
   add_foreign_key "example_taggings", "example_tags", column: "tag_id", on_delete: :cascade
   add_foreign_key "example_taggings", "examples", on_delete: :cascade
   add_foreign_key "examples", "example_categories", column: "category_id", on_delete: :nullify
+  add_foreign_key "refresh_sessions", "refresh_sessions", column: "replaced_by_id", on_delete: :nullify
+  add_foreign_key "refresh_sessions", "users", on_delete: :cascade
 end
