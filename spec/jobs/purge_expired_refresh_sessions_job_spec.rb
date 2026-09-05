@@ -210,6 +210,14 @@ RSpec.describe PurgeExpiredRefreshSessionsJob do
     # 등가 뮤턴트이기 때문이다 — `FOR UPDATE` 를 담은 WITH 질의는 키워드가 없어도
     # 인라인되지 않는다(같은 적대적 설정에서 계획·결과 모두 동일함을 psql 로 확인).
     # 이 두 예제가 지키는 것은 키워드가 아니라 **CTE 로 감쌌다는 사실**이다.
+    #
+    # **이 예제가 다른 PostgreSQL 버전에서 실패하면 가짜 경보로 처리하지 마라.**
+    # 여기서 단언하는 "정본 모양이 3행을 지운다"는 이 저장소가 쓰는 PostgreSQL
+    # (18.6 에서 실측)의 플래너·`heap_lock_tuple` 동작에 대한 **관찰**이지 규격이
+    # 아니다. 상위 버전에서 heap=asc 인데도 1행만 지워진다면, 그건 이 스펙이
+    # 낡았다는 뜻이지 구현이 깨졌다는 뜻이 아니다 — `retry` 나 `skip` 으로 덮지 말고
+    # 위 (1)(2) 전제를 그 버전에서 다시 실측한 뒤 예제를 갱신해라. 반대로 이 예제가
+    # 통과하는 동안에는 CTE 를 쓸 이유가 그 버전에서도 살아 있다는 증거다.
     it "canon's subquery shape ignores LIMIT under the same settings -- this is why the CTE exists" do
       three_expired_sessions_in_ascending_heap_order
 
