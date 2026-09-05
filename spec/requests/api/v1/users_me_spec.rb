@@ -19,6 +19,11 @@ RSpec.describe "GET /api/v1/users/me", type: :request do
     get path, headers: jsonapi_headers.merge(auth_bearer_headers)
 
     expect(response).to have_http_status(:ok)
+    # render jsonapi:(jsonapi-rails 렌더러)는 CrudActions#render_jsonapi_payload와
+    # 달리 Content-Type을 문자열로 직접 대입하지 않고 Rails의 표준 content_type=
+    # 경로를 타서 charset이 붙는다 — 실측: "application/vnd.api+json; charset=utf-8".
+    # JSONAPI_MEDIA_TYPE과 정확히 eq하면 charset 때문에 항상 실패한다.
+    expect(response.headers.fetch("Content-Type")).to start_with(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
     document = parsed_body
     resource = document.fetch("data")
     attributes = resource.fetch("attributes")
@@ -32,6 +37,14 @@ RSpec.describe "GET /api/v1/users/me", type: :request do
     # 아니다. 그런 라우트는 존재하지 않는다(config/routes.rb에 없다).
     expect(resource.dig("links", "self")).to eq("/api/v1/users/me")
     expect(document).not_to have_key("meta")
+    # UserSerializer가 attributes에 password_hash(또는 다른 이름의 비밀번호
+    # 필드)를 실수로 추가해도 위의 개별 attribute eq 단언들은 그 자체로는 안
+    # 잡는다(존재하는 키만 확인하므로) — 응답 본문 전체에서 원문 비밀번호와
+    # 해시가 안 보인다는 것을 별도로 고정한다. 두 단언으로 쪼갠 이유: RSpec의
+    # `not_to include(a, b)`는 "a와 b가 동시에 있으면 실패"로 묶여서, 키 이름에
+    # "password"가 없이 해시 값만 새는 경우처럼 둘 중 하나만 해당되면 못 잡는다.
+    expect(response.body).not_to include("password")
+    expect(response.body).not_to include(user.password_hash)
   end
 
   # 정본에서 확인한 사실이자 이 엔드포인트가 있는 이유: /users/me는
