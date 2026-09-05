@@ -47,14 +47,80 @@ RSpec.describe PurgeExpiredRefreshSessionsJob do
   # 행을 짧은 배치를 볼 때까지 전부 지우므로, 호출이 끝난 뒤의 DB 상태로는 `ORDER BY`
   # 가 있었는지도 `LIMIT` 이 지켜졌는지도 구분할 수 없다. 그래서 한 문장을 직접 돌린다.
   def run_batch_sql(limit, cutoff: Time.current, session_sql: [])
+    run_sql_batch(described_class::BATCH_SQL, limit, cutoff: cutoff, session_sql: session_sql)
+  end
+
+  # 위와 같은 한 배치를 **임의의 문장**으로 돌린다. 정본(FastAPI)의 서브쿼리 모양을
+  # 같은 조건에서 나란히 돌려 보기 위한 것이다 — 아래 "canon's subquery shape…"
+  # 예제가 유일한 호출자다.
+  def run_sql_batch(sql, limit, cutoff: Time.current, session_sql: [])
     ActiveRecord::Base.transaction do
       connection = ActiveRecord::Base.connection
       Array(session_sql).each { |statement| connection.execute(statement) }
-      connection.exec_query(described_class::BATCH_SQL, "spec batch", [
+      connection.exec_query(sql, "spec batch", [
         ActiveRecord::Relation::QueryAttribute.new("cutoff", cutoff, ActiveRecord::Type::DateTime.new),
         ActiveRecord::Relation::QueryAttribute.new("batch_size", limit, ActiveRecord::Type::Integer.new)
       ]).to_a.map { |row| row["id"] }
     end
+  end
+
+  # 플래너에게서 "후보를 한 번만 계산하는" 경로를 전부 빼앗는 설정.
+  #
+  # **`enable_material` 하나로는 재현되지 않는다.** 네 개가 각각 필요하고, 하나씩
+  # 되돌리면 그 하나가 막던 우회로로 플래너가 빠져나가 `LIMIT` 이 지켜진다(실측):
+  #
+  #   enable_material  Materialize 노드 (서브쿼리 결과를 한 번 물려 두고 rescan)
+  #   enable_hashagg   HashAggregate 유일화 (IN 목록을 미리 한 번 계산)
+  #   enable_sort      Sort + Unique 유일화 (같은 일을 정렬로)
+  #   enable_hashjoin  Hash Semi Join (바깥 스캔 행마다 재실행하지 않는 조인)
+  #
+  # `enable_mergejoin` · `enable_memoize` 는 이 스키마에서 필요 없지만(빼도 결과가
+  # 같다) 다른 버전·통계에서 새 우회로가 되지 않도록 방어적으로 함께 건다.
+  def hostile_planner_sql
+    [
+      "SET LOCAL enable_hashagg = off",
+      "SET LOCAL enable_sort = off",
+      "SET LOCAL enable_hashjoin = off",
+      "SET LOCAL enable_mergejoin = off",
+      "SET LOCAL enable_material = off",
+      "SET LOCAL enable_memoize = off"
+    ]
+  end
+
+  # 정본(FastAPI)의 모양. `app/jobs/refresh_sessions.py` 의
+  # `delete(RefreshSession).where(RefreshSession.id.in_(expired_ids))` 가 내는 것과
+  # 같은 구조이고, `described_class::BATCH_SQL` 과의 **유일한 차이는 후보 선택을
+  # CTE 로 감쌌는가**이다. 그 차이 하나가 아래 두 예제의 결과를 가른다.
+  def canonical_subquery_sql
+    <<~SQL
+      DELETE FROM refresh_sessions WHERE id IN (
+        SELECT id FROM refresh_sessions WHERE expires_at < $1
+        ORDER BY expires_at FOR UPDATE SKIP LOCKED LIMIT $2
+      ) RETURNING id
+    SQL
+  end
+
+  # 만료 3행을 **heap 순서가 `expires_at` 오름차순과 같도록** 넣는다.
+  #
+  # 아래 두 예제("canon's subquery shape…" 와 "respects LIMIT…")가 **이 헬퍼 하나를
+  # 공유한다.** 순서를 정하는 자리가 하나뿐이라야 두 예제가 같은 배치 위에서 서로
+  # 다른 결과를 낸다는 사실이 그 자체로 가드가 된다 — 여기서 순서를 뒤집으면
+  # 아래 ctid 단언이 먼저 실패하고, 그 단언까지 "일관되게" 고치면 이번엔
+  # "canon's subquery shape…" 예제가 실패한다(역순 heap 에서는 정본 모양도 1행만
+  # 지워서 두 세계가 같아지기 때문이다). 왜 heap 순서가 결과를 가르는지는 아래
+  # 두 예제 앞의 긴 주석에 적어 두었다.
+  def three_expired_sessions_in_ascending_heap_order
+    oldest = purgeable(3.days)
+    middle = purgeable(2.days)
+    newest = purgeable(1.day)
+
+    # heap 순서(ctid)와 `expires_at` 순서가 **같은 방향**이라는 것이 요점이다.
+    # 바로 위 이웃 예제는 일부러 이 둘을 반대로 만든다 — 그 예제와 방향이 다른 것은
+    # 실수가 아니다.
+    expect(RefreshSession.order(:ctid).pluck(:id)).to eq([ oldest.id, middle.id, newest.id ])
+    expect(RefreshSession.order(:expires_at).pluck(:id)).to eq([ oldest.id, middle.id, newest.id ])
+
+    [ oldest, middle, newest ]
   end
 
   # 다른 커넥션(다른 PostgreSQL 백엔드)에서 행 하나를 잠근 채로 블록을 실행한다.
@@ -108,7 +174,8 @@ RSpec.describe PurgeExpiredRefreshSessionsJob do
       expect(run_batch_sql(1)).to eq([ newest.id ])
     end
 
-    # 후보 선택을 CTE 로 감싼 것을 지키는 유일한 예제다.
+    # 아래 두 예제가 **짝을 이루어** 후보 선택을 CTE 로 감싼 것을 지킨다. 이 브랜치가
+    # 정본(FastAPI)과 갈리는 유일한 지점이고, 그 갈림을 지키는 것은 이 둘뿐이다.
     #
     # 기본 플래너 설정에서는 CTE 모양과 정본의 서브쿼리 모양이 **같은 결과를 낸다** —
     # PostgreSQL 18.6은 부수효과를 가진 서브쿼리를 `HashAggregate` 로 유일화하거나
@@ -117,33 +184,50 @@ RSpec.describe PurgeExpiredRefreshSessionsJob do
     # 테스트는 정본으로 되돌리는 뮤테이션에 **눈이 멀어 있다** — 이 프로젝트가 반복해서
     # 만나 온 "두 세계가 우연히 동일해 가드가 속 빈" 자리 그대로다.
     #
-    # `enable_material` 을 끄면 두 세계가 갈린다: 서브쿼리 모양은 같은 문장이
-    # `Subquery Scan ... loops=3` 이 되어 LIMIT 1 로 3행을 통째로 지우고, CTE 모양은
-    # `CTE candidates ... loops=1` 로 정확히 1행만 지운다. CTE 가 사는 이유가 정확히
-    # 그 차이 — 계획이 무엇이든 후보를 한 번만 계산한다는 보장 — 이므로 그 보장을 그대로
-    # 단언한다. 다른 GUC 들은 유일화 경로(HashAggregate/Sort)를 막아 플래너가 그 보장에
-    # 기대는 계획으로 내려가게 만드는 설정이다.
+    # 두 세계를 가르려면 **두 조건이 함께** 필요하다.
     #
-    # 참고: `AS MATERIALIZED` **키워드**만 떼는 뮤테이션은 이 예제에서도 살아남는다.
+    # (1) `HOSTILE_PLANNER_SQL` 의 GUC. `enable_material` 하나로는 재현되지 않는다 —
+    #     그 상수의 주석에 각각이 막는 우회로를 적어 두었다.
+    #
+    # (2) **heap 순서가 `expires_at` 오름차순이어야 한다.** 이건 아무 문서에도 없던
+    #     사실이라 여기 적는다. `Nested Loop Semi Join` 에서 서브쿼리가 재실행될 때
+    #     이번 DELETE 가 이미 지운 행은 `heap_lock_tuple` 이 `TM_SelfModified` 를
+    #     돌려주어 `ExecLockRows` 가 건너뛴다(Halloween problem 회피). 그래서 재실행마다
+    #     *다른* 후보가 뽑힌다. 그러나 **그 후보가 실제로 지워지려면 바깥 Seq Scan 이
+    #     heap 순서로 그 행에 나중에 도달해야 한다.** heap=asc 면 세 행이 다 지워지고
+    #     (LIMIT 위반), heap=desc 면 한 행만 지워져 **우연히 정상으로 보인다.**
+    #
+    # 그래서 두 예제 다 삽입 직후 ctid 순서를 단언한다. **바로 위 이웃 예제
+    # ("deletes oldest first even when heap order is the reverse of expires_at order")는
+    # 일부러 반대 방향으로 넣고 ctid 까지 단언한다** — 두 예제를 "일관되게" 정리하려는
+    # 순간 이 가드가 조용히 빈다. 방향이 반대인 것이 실수가 아니라는 것을 여기 적어 둔다.
+    #
+    # 이 배치가 조용히 빌 수 없는 이유: 픽스처 순서를 뒤집으면 ctid 단언이 먼저
+    # 실패하고, ctid 단언까지 함께 "고치면" 첫 번째 예제(정본 모양이 3행을 지운다)가
+    # 실패한다. 즉 **두 세계가 실제로 갈린다는 사실 자체를 테스트가 단언한다.**
+    #
+    # 참고: `AS MATERIALIZED` **키워드**만 떼는 뮤테이션은 두 예제에서 모두 살아남는다.
     # 등가 뮤턴트이기 때문이다 — `FOR UPDATE` 를 담은 WITH 질의는 키워드가 없어도
     # 인라인되지 않는다(같은 적대적 설정에서 계획·결과 모두 동일함을 psql 로 확인).
-    # 이 예제가 지키는 것은 키워드가 아니라 **CTE 로 감쌌다는 사실**이다.
+    # 이 두 예제가 지키는 것은 키워드가 아니라 **CTE 로 감쌌다는 사실**이다.
+    it "canon's subquery shape ignores LIMIT under the same settings -- this is why the CTE exists" do
+      three_expired_sessions_in_ascending_heap_order
+
+      deleted = run_sql_batch(canonical_subquery_sql, 1, session_sql: hostile_planner_sql)
+
+      # `LIMIT 1` 인데 만료 3행이 통째로 지워진다. **이 단언이 위 헬퍼의 heap 순서를
+      # 강제하는 자리다** — 순서가 뒤집히면 정본 모양도 1행만 지워서 여기가 실패한다.
+      expect(deleted.length).to eq(3)
+      expect(RefreshSession.count).to eq(0)
+    end
+
     it "respects LIMIT even when the planner is denied every way to compute the subquery once" do
-      purgeable(3.days)
-      purgeable(2.days)
-      purgeable(1.day)
+      oldest, middle, newest = three_expired_sessions_in_ascending_heap_order
 
-      deleted = run_batch_sql(1, session_sql: [
-        "SET LOCAL enable_hashagg = off",
-        "SET LOCAL enable_sort = off",
-        "SET LOCAL enable_hashjoin = off",
-        "SET LOCAL enable_mergejoin = off",
-        "SET LOCAL enable_material = off",
-        "SET LOCAL enable_memoize = off"
-      ])
+      deleted = run_batch_sql(1, session_sql: hostile_planner_sql)
 
-      expect(deleted.length).to eq(1)
-      expect(RefreshSession.count).to eq(2)
+      expect(deleted).to eq([ oldest.id ])
+      expect(session_ids).to eq([ middle.id, newest.id ])
     end
 
     it "skips a candidate row another transaction holds and takes the next oldest instead" do

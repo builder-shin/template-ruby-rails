@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 # 보존 기간(`REFRESH_SESSION_RETENTION_SECONDS`)을 넘긴 만료 refresh 세션을 오래된
-# 순서로 배치 삭제한다. `config/sidekiq_cron.yml`이 이 잡을 매일 한 번 등록한다.
+# 순서로 배치 삭제한다. `config/sidekiq_cron.yml`이 이 잡을 **매시 정각**으로
+# 등록한다(`cron: "0 * * * * UTC"`) — 정본(FastAPI) README와 같은 주기다.
 #
 # **선택 조건은 `expires_at` 하나뿐이다.** `revoked_at`이나 `replaced_by_id`로 더 거르지
 # 않는다 — 아직 제시 가능한(유효한) 세션은 보존 설정이 무엇이든 지워지면 안 되고,
@@ -88,15 +89,37 @@ class PurgeExpiredRefreshSessionsJob < ApplicationJob
   # 실측(PostgreSQL 18.6, 이 저장소의 test DB): 기본 플래너 설정에서는 그 일이 **일어나지
   # 않는다** — 플래너가 서브쿼리를 `HashAggregate`로 유일화하거나 `Materialize`를 끼워
   # 넣어 어느 쪽이든 한 번만 계산한다. 3~50,000행 · `LIMIT` 1~1,000 · 인덱스 유무 ·
-  # 통계 유무의 11개 조합에서 전부 `LIMIT`이 정확히 지켜졌다. 그러나 `enable_material`을
-  # 끄면 같은 문장이 `Subquery Scan on "ANY_subquery" ... loops=3`으로 바뀌며 만료 3행을
-  # `LIMIT 1`로 **통째로 지운다.** 즉 정본의 정확성은 오늘의 플래너 선택에 기대고 있고,
-  # 그 선택은 통계·설정·버전에 따라 바뀔 수 있는 종류의 것이다.
+  # 통계 유무의 11개 조합에서 전부 `LIMIT`이 정확히 지켜졌다.
+  #
+  # **재현하려면 GUC 하나로는 안 된다 — 네 개를 함께 꺼야 하고 각각이 개별적으로
+  # 필요하다.** 하나씩 되돌린 대조로 실측했다(만료 3행, `LIMIT 1`, heap=asc):
+  #
+  #     enable_material·hashagg·sort·hashjoin off   -> 3행 삭제 (LIMIT 위반)
+  #       + enable_material 만 되돌림                -> 1행  `Materialize (loops=3)` 가 구한다
+  #       + enable_hashagg  만 되돌림                -> 1행  `HashAggregate (loops=1)` 가 구한다
+  #       + enable_sort     만 되돌림                -> 1행  `Unique`←`Sort` 가 구한다
+  #       + enable_hashjoin 만 되돌림                -> 1행  `Hash Semi Join` 이 구한다
+  #
+  # 즉 네 개는 각각 "후보를 한 번만 계산하는" 서로 다른 우회로를 하나씩 막는다. 넷을
+  # 다 막았을 때에만 계획이 `Nested Loop Semi Join` + `Subquery Scan on "ANY_subquery"
+  # ... loops=3`으로 내려가고, 그때 만료 3행이 `LIMIT 1`로 **통째로 지워진다.**
+  # (`enable_mergejoin`·`enable_memoize`는 이 스키마에서 필요 없다 — 스펙이 방어적으로
+  # 함께 걸 뿐이고, 빼도 결과가 같다.)
+  #
+  # **그리고 heap 순서가 `expires_at` 오름차순이어야 한다.** 서브쿼리가 재실행될 때
+  # 이번 DELETE가 이미 지운 행은 `TM_SelfModified`로 건너뛰어져 매번 다른 후보가
+  # 뽑히지만, 그 후보가 실제로 지워지려면 바깥 Seq Scan이 heap 순서로 그 행에 나중에
+  # 도달해야 한다. heap 역순이면 같은 설정에서도 1행만 지워져 **우연히 정상으로 보인다**
+  # (실측). 스펙이 이 두 조건을 함께 세우는 이유이자, 그 예제가 픽스처 삽입 순서를
+  # 명시적으로 단언하는 이유다.
+  #
+  # 즉 정본의 정확성은 오늘의 플래너 선택에 기대고 있고, 그 선택은 통계·설정·버전에
+  # 따라 바뀔 수 있는 종류의 것이다.
   #
   # CTE는 그 의존을 없앤다. PostgreSQL은 `FOR UPDATE`처럼 부수효과가 있는 WITH 질의를
-  # 상위 질의로 인라인하지 못하므로 반드시 한 번만 계산한다 — 같은 `enable_material=off`
-  # 에서도 `CTE candidates ... loops=1`로 정확히 1행만 지운다. 잠금·`SKIP LOCKED` 의미는
-  # 그대로다.
+  # 상위 질의로 인라인하지 못하므로 반드시 한 번만 계산한다 — 위의 네 GUC를 다 끈
+  # 설정에서도 `CTE candidates ... loops=1`로 정확히 1행만 지운다. 잠금·`SKIP LOCKED`
+  # 의미는 그대로다.
   #
   # **`AS MATERIALIZED` 키워드 자체는 오늘 아무 동작도 바꾸지 않는다** — 실측으로 확인했다.
   # 키워드를 뗀 `WITH candidates AS (...)`도 같은 적대적 설정에서 같은 계획(`loops=1`)과
