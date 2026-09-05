@@ -28,14 +28,23 @@ RSpec.describe "Example JSON:API query contract", type: :request do
       def query_contract
         {
           filters: {
-            "title" => %w[exact contains],
-            "status" => %w[exact in],
-            "score" => %w[exact gt gte lt lte in],
-            "category.id" => %w[exact in isNull],
-            "createdAt" => %w[exact gt gte lt lte]
+            "title" => { attribute: :title, type: :string, operators: %w[exact contains] },
+            "status" => { attribute: :status, type: :enum, operators: %w[exact in] },
+            "score" => { attribute: :score, type: :integer, operators: %w[exact gt gte lt lte in] },
+            "category.id" => { attribute: :category_id, type: :uuid, operators: %w[exact in isNull] },
+            "createdAt" => { attribute: :created_at, type: :datetime, operators: %w[exact gt gte lt lte] }
           },
-          sorts: %w[title status score createdAt updatedAt],
-          includes: %w[category tags]
+          sorts: {
+            "title" => { attribute: :title, nullable: false },
+            "status" => { attribute: :status, nullable: false },
+            "score" => { attribute: :score, nullable: false },
+            "createdAt" => { attribute: :created_at, nullable: false },
+            "updatedAt" => { attribute: :updated_at, nullable: false }
+          },
+          includes: %w[category tags],
+          default_sort: [ { field: "createdAt", direction: :desc } ],
+          tie_breaker: { field: "id", direction: :asc },
+          default_page_size: 20
         }
       end
     end)
@@ -525,5 +534,25 @@ RSpec.describe "Example JSON:API query contract", type: :request do
         expect(response.body).not_to include("ActionController::BadRequest", "Conflicting types")
       end
     end
+  end
+
+  it "keeps every column and type declaration inside the controller contract" do
+    # 쿼리 엔진이 자원을 모른다는 것이 이 단계의 산출물이다. 공유 파서에 자원별
+    # 상수가 남아 있으면 두 번째 자원을 추가하는 순간 합집합으로 부풀기 시작한다.
+    source = Rails.root.join("app/lib/jsonapi/query_parser.rb").read
+
+    expect(source).not_to include("FILTER_FIELDS")
+    expect(source).not_to include("SORT_FIELDS")
+    expect(source).not_to include("MAX_SCORE_INTEGER")
+    expect(source).not_to match(/def parse_status/)
+  end
+
+  it "sorts by the contract's declared default when no sort is given" do
+    # 기본 정렬이 파서에 하드코딩돼 있으면 categories의 `name ASC`를 낼 수 없다.
+    contract = Api::V1::ExamplesController.new.send(:query_contract)
+
+    expect(contract.fetch(:default_sort)).to eq([ { field: "createdAt", direction: :desc } ])
+    expect(contract.fetch(:tie_breaker)).to eq({ field: "id", direction: :asc })
+    expect(contract.fetch(:default_page_size)).to eq(20)
   end
 end

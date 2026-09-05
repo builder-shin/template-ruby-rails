@@ -17,23 +17,8 @@ module Jsonapi
     INTEGER = /\A[+-]?[0-9]+\z/
     UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
     DATETIME_WITH_OFFSET = /\A\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})\z/
-    MAX_SCORE_INTEGER = (2**31) - 1
-
-    FILTER_FIELDS = {
-      "title" => { attribute: :title, type: :string },
-      "status" => { attribute: :status, type: :status },
-      "score" => { attribute: :score, type: :integer },
-      "category.id" => { attribute: :category_id, type: :uuid },
-      "createdAt" => { attribute: :created_at, type: :datetime }
-    }.freeze
-    SORT_FIELDS = {
-      "title" => :title,
-      "status" => :status,
-      "score" => :score,
-      "createdAt" => :created_at,
-      "updatedAt" => :updated_at,
-      "id" => :id
-    }.freeze
+    INT4_MAX = (2**31) - 1
+    INT8_MAX = (2**63) - 1
 
     FilterClause = Data.define(:name, :operator, :value)
     SortTerm = Data.define(:name, :descending)
@@ -44,17 +29,17 @@ module Jsonapi
       @request = request
       @action_params = action_params
       @model = model
-      @filter_contract = contract.fetch(:filters).to_h do |name, operators|
-        [ name.to_s, operators.map(&:to_s).freeze ]
-      end.freeze
-      @sort_contract = contract.fetch(:sorts).map(&:to_s).freeze
+      @filters = normalize_filters(contract.fetch(:filters))
+      @sorts = normalize_sorts(contract.fetch(:sorts))
       @include_contract = contract.fetch(:includes).map(&:to_s).freeze
+      @default_sort = contract.fetch(:default_sort).freeze
+      @tie_breaker = contract.fetch(:tie_breaker).freeze
       @parsed_filters = []
       @seen_filters = Set.new
       @sort_terms = nil
       @includes = nil
       @page_number = 1
-      @page_size = Pagination::DEFAULT_PAGE_SIZE
+      @page_size = contract.fetch(:default_page_size, Pagination::DEFAULT_PAGE_SIZE)
       @seen_page_parameters = Set.new
     end
 
@@ -84,6 +69,28 @@ module Jsonapi
 
     private
 
+    def normalize_filters(declarations)
+      declarations.to_h do |name, declaration|
+        [
+          name.to_s,
+          {
+            attribute: declaration.fetch(:attribute),
+            type: declaration.fetch(:type),
+            operators: declaration.fetch(:operators).map(&:to_s).freeze
+          }.freeze
+        ]
+      end.freeze
+    end
+
+    def normalize_sorts(declarations)
+      declarations.to_h do |name, declaration|
+        [
+          name.to_s,
+          { attribute: declaration.fetch(:attribute), nullable: declaration.fetch(:nullable) }.freeze
+        ]
+      end.freeze
+    end
+
     def parse_raw_pairs
       Jsonapi::RawQuery.decode(@request.query_string)
     rescue ArgumentError
@@ -105,10 +112,8 @@ module Jsonapi
 
       name, requested_operator = match.captures
       operator = requested_operator || "exact"
-      allowed_operators = @filter_contract[name]
-      unless allowed_operators&.include?(operator) && FILTER_FIELDS.key?(name)
-        invalid_query!("INVALID_FILTER", parameter)
-      end
+      declaration = @filters[name]
+      invalid_query!("INVALID_FILTER", parameter) unless declaration&.fetch(:operators)&.include?(operator)
 
       key = [ name, operator ]
       invalid_query!("INVALID_FILTER", parameter) if @seen_filters.include?(key)
@@ -138,35 +143,31 @@ module Jsonapi
     end
 
     def parse_scalar(name, raw_value, parameter)
-      type = FILTER_FIELDS.fetch(name).fetch(:type)
-
-      case type
-      when :string
-        raw_value
-      when :status
-        parse_status(raw_value, parameter)
-      when :integer
-        parse_integer(raw_value, parameter)
-      when :uuid
-        parse_uuid(raw_value, parameter)
-      when :datetime
-        parse_datetime(raw_value, parameter)
+      @current_filter_name = name
+      case @filters.fetch(name).fetch(:type)
+      when :string then raw_value
+      when :enum then parse_enum(raw_value, parameter)
+      when :integer then parse_bounded_integer(raw_value, parameter, INT4_MAX)
+      when :bigint then parse_bounded_integer(raw_value, parameter, INT8_MAX)
+      when :uuid then parse_uuid(raw_value, parameter)
+      when :datetime then parse_datetime(raw_value, parameter)
       else
         raise ArgumentError, "unsupported JSON:API filter type"
       end
     end
 
-    def parse_status(raw_value, parameter)
-      return raw_value if @model.defined_enums.fetch("status", {}).key?(raw_value)
+    def parse_enum(raw_value, parameter)
+      enum_name = @filters.fetch(@current_filter_name).fetch(:attribute).to_s
+      return raw_value if @model.defined_enums.fetch(enum_name, {}).key?(raw_value)
 
       invalid_query!("INVALID_FILTER", parameter)
     end
 
-    def parse_integer(raw_value, parameter)
+    def parse_bounded_integer(raw_value, parameter, maximum)
       invalid_query!("INVALID_FILTER", parameter) unless INTEGER.match?(raw_value)
 
       value = Integer(raw_value, 10)
-      return value if (-MAX_SCORE_INTEGER - 1..MAX_SCORE_INTEGER).cover?(value)
+      return value if (-maximum - 1..maximum).cover?(value)
 
       invalid_query!("INVALID_FILTER", parameter)
     rescue ArgumentError
@@ -197,7 +198,7 @@ module Jsonapi
       @sort_terms = tokens.map do |token|
         descending = token.start_with?("-")
         name = descending ? token.delete_prefix("-") : token
-        invalid_query!("INVALID_SORT", parameter) unless @sort_contract.include?(name)
+        invalid_query!("INVALID_SORT", parameter) unless @sorts.key?(name)
         invalid_query!("INVALID_SORT", parameter) if names.include?(name)
 
         names << name
@@ -271,10 +272,8 @@ module Jsonapi
 
     def apply_filters(scope)
       @parsed_filters.reduce(scope) do |relation, filter|
-        definition = FILTER_FIELDS.fetch(filter.name)
-        column = @model.arel_table[definition.fetch(:attribute)]
-        predicate = filter_predicate(column, filter)
-        relation.where(predicate)
+        column = @model.arel_table[@filters.fetch(filter.name).fetch(:attribute)]
+        relation.where(filter_predicate(column, filter))
       end
     end
 
@@ -303,14 +302,26 @@ module Jsonapi
     end
 
     def apply_sort(scope)
-      terms = @sort_terms || [ SortTerm.new("createdAt", true) ]
-      terms = [ *terms, SortTerm.new("id", false) ] unless terms.any? { |term| term.name == "id" }
-      order = terms.map do |term|
-        column = @model.arel_table[SORT_FIELDS.fetch(term.name)]
-        term.descending ? column.desc : column.asc
-      end
+      terms = @sort_terms || default_sort_terms
+      terms = [ *terms, tie_breaker_term ] unless terms.any? { |term| term.name == @tie_breaker.fetch(:field) }
+      scope.reorder(*terms.map { |term| order_expression(term) })
+    end
 
-      scope.reorder(*order)
+    def default_sort_terms
+      @default_sort.map { |entry| SortTerm.new(entry.fetch(:field), entry.fetch(:direction) == :desc) }
+    end
+
+    def tie_breaker_term
+      SortTerm.new(@tie_breaker.fetch(:field), @tie_breaker.fetch(:direction) == :desc)
+    end
+
+    # tie breaker는 공개 `sorts` 표에 없어도 된다 — `id`가 그 경우다. 표에 없으면
+    # 공개 이름을 그대로 컬럼 이름으로 쓴다. 그 값은 사용자 입력이 아니라 컨트롤러의
+    # 선언이므로 SQL 식별자 자리에 그대로 들어가도 안전하다.
+    def order_expression(term)
+      attribute = @sorts.dig(term.name, :attribute) || term.name.to_sym
+      column = @model.arel_table[attribute]
+      term.descending ? column.desc : column.asc
     end
 
     def apply_pagination(scope)
