@@ -56,7 +56,9 @@ module Api
       end
 
       def jsonapi_query_mode
-        { "index" => :collection, "show" => :none }.fetch(action_name, :none)
+        # show는 :none이 아니라 :include_only다 — 이유는 ExampleCategoriesController와
+        # 같다.
+        { "index" => :collection, "show" => :include_only }.fetch(action_name, :none)
       end
 
       def allowed_relationships

@@ -51,6 +51,18 @@ RSpec.describe "Example CRUD", type: :request do
     expect(parsed_body.dig("data", "attributes", "title")).to eq("First")
   end
 
+  it "does not emit a meta member on a single-resource show" do
+    # 단건 조회에는 total-count 개념이 없다 — jsonapi_pagination_meta가 컬렉션이
+    # 아닌 자원에는 {}를 돌려주므로, meta 자체를 없애지 않으면 `"total-count": null`이
+    # 나간다(정본은 show에 meta를 전혀 싣지 않는다).
+    example = create(:example)
+
+    get resource_path(example), headers: jsonapi_headers
+
+    expect(response).to have_http_status(:ok)
+    expect(parsed_body).not_to have_key("meta")
+  end
+
   it "creates an Example with relationships and a canonical Location" do
     category = create(:example_category)
     tags = create_list(:example_tag, 2)

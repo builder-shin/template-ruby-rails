@@ -5,8 +5,9 @@ require "uri"
 # JSON:API 조회 파라미터의 concern 진입점.
 #
 # 파싱과 scope 적용은 `Jsonapi::QueryParser`가, 쿼리 문자열 디코딩과 형태 충돌
-# 판정은 `Jsonapi::RawQuery`가, 페이지네이션은 `Jsonapi::Pagination`이 소유한다.
-# 여기 남은 것은 Rails 콜백에 붙는 진입점과 액션별 검증뿐이다.
+# 판정은 `Jsonapi::RawQuery`가, 페이지네이션(offset·cursor 링크 조립)은
+# `Jsonapi::Pagination`이, keyset 커서의 인코딩·디코딩은 `Jsonapi::Cursor`가
+# 소유한다. 여기 남은 것은 Rails 콜백에 붙는 진입점과 액션별 검증뿐이다.
 module JsonapiQuery
   extend ActiveSupport::Concern
 

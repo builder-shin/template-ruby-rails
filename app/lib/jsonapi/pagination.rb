@@ -3,12 +3,17 @@
 require "uri"
 
 module Jsonapi
-  # offset 페이지네이션의 scope 적용과 링크 조립.
+  # offset·cursor(keyset) 두 페이지네이션 모두의 scope 적용과 링크 조립.
   #
-  # `next`는 probe(요청 크기 +1행을 읽어 유무를 판정)로 정해지고, `last`는
+  # offset: `next`는 probe(요청 크기 +1행을 읽어 유무를 판정)로 정해지고, `last`는
   # `page[totals]=true`가 실행한 COUNT가 있을 때만 나온다. 실제 COUNT 실행과
-  # probe 조회는 `QueryParser`가 하고, 여기는 그 결과로 scope를 자르고
-  # 링크를 조립하는 순수 함수만 담는다.
+  # probe 조회는 `QueryParser`가 하고, 여기는 그 결과로 scope를 자르고 링크를
+  # 조립한다.
+  #
+  # cursor: `cursor_links`가 경계 행(첫 행·마지막 행)의 정렬 값으로 `prev`/`next`/
+  # `first`/`last`를 조립한다. `boundary_cursor`는 정렬 값이 왕복 불가능한
+  # 타입이면 `JsonApiError`를 낸다(`Jsonapi::Cursor.encodable?`) — 그래서 이
+  # 모듈 전체를 "순수 함수만 담는다"고 부를 수는 없다.
   module Pagination
     MAX_PAGE_SIZE = 100
     MAX_SQL_INTEGER = (2**63) - 1

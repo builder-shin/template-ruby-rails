@@ -38,7 +38,14 @@ RSpec.describe Jsonapi::Cursor do
 
     it "rejects a cursor longer than the maximum length without decoding it" do
       # 정본의 4096자 상한과 맞춘다 — base64+JSON 디코딩 비용을 들이기 전에 자른다.
+      #
+      # "without decoding it"을 실제로 잰다: Base64.urlsafe_decode64를 호출되면
+      # (일반) 예외를 내도록 스텁해 둔다. 오버사이즈 문자열은 어차피 base64로도
+      # JSON으로도 유효하지 않아 길이 가드를 지워도 같은 INVALID_PAGE로 끝나므로,
+      # 스텁 없이는 이 테스트가 가드의 존재가 아니라 디코드 실패를 재는 셈이 된다.
+      # 가드가 지워지면 이 스텁이 raise_error(JsonApiError) 기대를 깨뜨려 잡아낸다.
       oversized = "a" * (described_class::MAX_CURSOR_LENGTH + 1)
+      allow(Base64).to receive(:urlsafe_decode64).and_raise("length guard did not short-circuit")
 
       expect { described_class.decode(oversized, "id:asc", "page[after]") }
         .to raise_error(JsonApiError) { |error| expect(error.code).to eq("INVALID_PAGE") }

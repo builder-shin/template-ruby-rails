@@ -77,7 +77,13 @@ module Api
       end
 
       def jsonapi_query_mode
-        { "index" => :collection, "show" => :none }.fetch(action_name, :none)
+        # show는 :none이 아니라 :include_only다 — ExamplesController와 맞춘다.
+        # :none이면 ?include=든 ?page[size]=2든 전부 INVALID_QUERY_PARAMETER가
+        # 되어 버려 정본과 어긋난다(정본은 include=bogus에 INVALID_INCLUDE,
+        # page[size]에 INVALID_PAGE를 낸다). 이 자원에 노출할 관계가 없어도
+        # include 파라미터 자체를 받아들이는 것과 무슨 관계를 허용할지는 별개다 —
+        # 후자는 allowed_includes([])가 이미 막는다.
+        { "index" => :collection, "show" => :include_only }.fetch(action_name, :none)
       end
 
       def allowed_relationships

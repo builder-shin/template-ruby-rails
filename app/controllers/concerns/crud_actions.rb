@@ -1,9 +1,6 @@
 module CrudActions
   extend ActiveSupport::Concern
 
-  # 페이지네이션 최대 크기. 클라이언트가 과도한 page[size] 로 풀스캔을 유발하는 것을 방지
-  MAX_PAGE_SIZE = 100
-
   included do
     include JSONAPI::Deserialization
     include JSONAPI::Fetching
@@ -28,9 +25,11 @@ module CrudActions
       end
     end
 
-    # Override JSONAPI::Pagination#jsonapi_page_size to clamp the requested size
+    # Override JSONAPI::Pagination#jsonapi_page_size to clamp the requested size.
+    # 새 파서(Jsonapi::QueryParser)가 쓰는 상한과 같은 값을 참조한다 — 각자 정의하면
+    # 하나만 바뀌었을 때 두 페이지네이션 경로의 상한이 조용히 갈라진다.
     define_method(:jsonapi_page_size) do |pagination_params|
-      [ super(pagination_params), MAX_PAGE_SIZE ].min
+      [ super(pagination_params), Jsonapi::Pagination::MAX_PAGE_SIZE ].min
     end
   end
 
@@ -139,7 +138,13 @@ module CrudActions
     # 그 외에는 `.present?`가 false라 키 자체를 넣지 않는다.
     return @jsonapi_query_meta if defined?(@jsonapi_query_meta)
 
+    # 이 아래는 레거시(비-query_contract) 경로다. resources가 컬렉션이 아니면(show,
+    # new 등 단건 렌더) gem의 jsonapi_pagination_meta가 {}를 돌려주므로 :records가
+    # nil이다 — 단건 조회에는 총 개수라는 개념이 없으므로, 정본과 같이 meta
+    # 자체를 내지 않는다.
     total = jsonapi_pagination_meta(resources)[:records]
+    return nil if total.nil? # 단건 조회에는 총 개수가 없다 — 빈 meta를 내지 않는다
+
     { "total-count" => total }
   end
 

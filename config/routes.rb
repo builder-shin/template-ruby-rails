@@ -24,6 +24,9 @@ Rails.application.routes.draw do
 
       # 읽기 전용 참조 자원. Rails에서 "읽기 전용"은 여기서 정한다 — only: %i[index show]가
       # 그 전부이고, CrudActions가 물려준 write 액션은 라우트가 없어 도달할 수 없다.
+      # 두 컨트롤러 다 authenticate_write! 콜백이 없으므로, 이 only:에 쓰기 동사를 하나라도
+      # 추가하면 그대로 인증 없는 쓰기가 열린다 — spec/routing/api/v1/reference_resources_routing_spec.rb의
+      # contain_exactly가 그걸 막는 유일한 장치다.
       resources :categories, only: %i[index show], controller: "example_categories"
       resources :tags, only: %i[index show], controller: "example_tags"
     end
