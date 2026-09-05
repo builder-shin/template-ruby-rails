@@ -72,10 +72,10 @@ en:
         detail: "Your account is inactive."
       EMAIL_ALREADY_REGISTERED:
         title: "Email already registered"
-        detail: "This email address is already in use."
+        detail: "The email address is already registered."
       INVALID_CREDENTIALS:
         title: "Invalid credentials"
         detail: "The email or password is incorrect."
       TOKEN_REVOKED:
         title: "Token revoked"
-        detail: "This authentication token has already been revoked."
+        detail: "The authentication token has been revoked."

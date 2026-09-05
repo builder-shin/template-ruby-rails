@@ -71,11 +71,11 @@ ko:
         title: "비활성 사용자"
         detail: "비활성화된 계정입니다."
       EMAIL_ALREADY_REGISTERED:
-        title: "이미 가입된 이메일"
-        detail: "이미 사용 중인 이메일입니다."
+        title: "이미 등록된 이메일"
+        detail: "이미 등록된 이메일입니다."
       INVALID_CREDENTIALS:
-        title: "잘못된 자격 증명"
+        title: "잘못된 인증 정보"
         detail: "이메일 또는 비밀번호가 올바르지 않습니다."
       TOKEN_REVOKED:
         title: "폐기된 토큰"
-        detail: "이미 폐기된 인증 토큰입니다."
+        detail: "인증 토큰이 폐기되었습니다."
