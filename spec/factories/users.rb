@@ -15,6 +15,11 @@ FactoryBot.define do
   end
 
   factory :refresh_session do
+    # refresh_sessions.id는 DB 기본값이 없다 — 실제 애플리케이션은 refresh JWT의
+    # jti를 id로 명시해서 넣는다(Task 3+). factory도 그 계약을 그대로 흉내 내야
+    # 하므로 id를 직접 채운다; 여기를 지우면 매 create(:refresh_session)이
+    # NOT NULL 위반으로 실패한다.
+    id { SecureRandom.uuid }
     association :user
     token_hash { SecureRandom.hex(32) }
     expires_at { 30.days.from_now }

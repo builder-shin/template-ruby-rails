@@ -74,13 +74,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_000000) do
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'active'::character varying::text, 'archived'::character varying::text])", name: "examples_status_check"
   end
 
-  create_table "refresh_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+  create_table "refresh_sessions", id: :uuid, default: nil, force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "expires_at", null: false
     t.uuid "replaced_by_id"
     t.datetime "revoked_at"
     t.string "token_hash", limit: 64, null: false
     t.uuid "user_id", null: false
+    t.index ["expires_at"], name: "index_refresh_sessions_on_expires_at"
     t.index ["replaced_by_id"], name: "index_refresh_sessions_on_replaced_by_id"
     t.index ["token_hash"], name: "index_refresh_sessions_on_token_hash", unique: true
     t.index ["user_id"], name: "index_refresh_sessions_on_user_id"

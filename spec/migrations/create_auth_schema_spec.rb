@@ -84,14 +84,44 @@ RSpec.describe "CreateAuthSchema migration" do
       expect(@connection.tables).to include("users", "refresh_sessions")
     end
 
-    it "uses generated UUID ids as primary keys" do
-      %w[users refresh_sessions].each do |table_name|
-        id_column = @connection.columns(table_name).find { |column| column.name == "id" }
+    it "uses a generated UUID id as the users primary key" do
+      id_column = @connection.columns("users").find { |column| column.name == "id" }
 
-        expect(@connection.primary_key(table_name)).to eq("id")
-        expect(id_column.sql_type).to eq("uuid")
-        expect(id_column.default_function).to eq("gen_random_uuid()")
-      end
+      expect(@connection.primary_key("users")).to eq("id")
+      expect(id_column.sql_type).to eq("uuid")
+      expect(id_column.default_function).to eq("gen_random_uuid()")
+    end
+
+    it "uses an application-supplied UUID id for refresh_sessions, with no DB default" do
+      # refresh_sessions.id는 refresh JWT의 jti와 같아야 하므로 애플리케이션이
+      # 매번 명시적으로 채운다(Task 3+). DB 기본값이 있으면 id를 빠뜨리는
+      # 실수가 나도 삽입이 조용히 성공해 jti와 무관한 UUID가 PK로 들어가 버리고,
+      # 그 refresh 토큰을 쓰는 모든 요청이 원인을 알기 어려운 "session not
+      # found"로 실패한다. 기본값이 없어야 같은 실수가 NOT NULL 위반으로 즉시
+      # 드러난다 — 이 부재는 실수가 아니라 설계이므로 되돌리지 말 것.
+      id_column = @connection.columns("refresh_sessions").find { |column| column.name == "id" }
+
+      expect(@connection.primary_key("refresh_sessions")).to eq("id")
+      expect(id_column.sql_type).to eq("uuid")
+      expect(id_column.default_function).to be_nil
+    end
+
+    it "rejects an insert into refresh_sessions that omits id" do
+      user_id = insert_user
+
+      expect do
+        @connection.transaction(requires_new: true) do
+          @connection.execute(<<~SQL.squish)
+            INSERT INTO refresh_sessions (user_id, token_hash, expires_at, created_at)
+            VALUES (
+              #{@connection.quote(user_id)},
+              #{@connection.quote(SecureRandom.hex(32))},
+              CURRENT_TIMESTAMP + INTERVAL '1 day',
+              CURRENT_TIMESTAMP
+            )
+          SQL
+        end
+      end.to raise_error(ActiveRecord::NotNullViolation)
     end
 
     it "defines the users columns with the expected types and null constraints" do
@@ -139,6 +169,15 @@ RSpec.describe "CreateAuthSchema migration" do
 
     it "adds a non-unique index on refresh_sessions.user_id" do
       index = @connection.indexes("refresh_sessions").find { |i| i.columns == [ "user_id" ] }
+
+      expect(index).to be_present
+    end
+
+    it "adds a non-unique index on refresh_sessions.expires_at" do
+      # 정리 job(Task 7)이 expires_at < now() ORDER BY expires_at LIMIT n으로
+      # 만료된 세션을 배치 조회한다. 인덱스가 없으면 그 후보 조회가 매번
+      # 테이블 전체를 스캔한다.
+      index = @connection.indexes("refresh_sessions").find { |i| i.columns == [ "expires_at" ] }
 
       expect(index).to be_present
     end
