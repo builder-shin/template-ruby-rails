@@ -15,6 +15,22 @@ RSpec.describe Auth::Tokens do
     (segments + [ Base64.urlsafe_encode64(signature, padding: false) ]).join(".")
   end
 
+  # F2 (팀장 fix round 1): exp/iat에 1e400 같은 리터럴을 넣은 토큰을 만들 때 쓴다.
+  # JSON.generate(Float::INFINITY)는 JSON::GeneratorError로 거부되므로 raw_token으로는
+  # 이 payload를 만들 수 없다 — payload JSON 텍스트를 직접 조립해서 field의 값
+  # 부분만 파싱되지 않는 리터럴(`1e400`, `-1e400`)로 바꿔치기한다. 디코드 쪽에서
+  # JSON.parse가 이 리터럴을 Float::INFINITY/-Float::INFINITY로 되살린다.
+  def raw_token_with_literal_field(field, literal, overrides = {})
+    payload = valid_payload(overrides)
+    header = { "alg" => "HS256", "typ" => "JWT" }
+    body = payload.map { |key, value| key == field ? "#{JSON.generate(key)}:#{literal}" : "#{JSON.generate(key)}:#{JSON.generate(value)}" }
+    payload_json = "{#{body.join(',')}}"
+    segments = [ Base64.urlsafe_encode64(JSON.generate(header), padding: false),
+                 Base64.urlsafe_encode64(payload_json, padding: false) ]
+    signature = OpenSSL::HMAC.digest("SHA256", described_class.config.secret_key, segments.join("."))
+    (segments + [ Base64.urlsafe_encode64(signature, padding: false) ]).join(".")
+  end
+
   def valid_payload(overrides = {})
     now = Time.now.to_i
     {
@@ -196,6 +212,59 @@ RSpec.describe Auth::Tokens do
       end
     end
 
+    it "rejects an infinite exp instead of crashing (F2)" do
+      # 1e400은 JSON에 담을 수 있는 리터럴이지만 JSON.parse가 Float::INFINITY로
+      # 되살린다. exp가 Infinity면 decode_payload 내장 만료 검사(`payload['exp'].to_i`)가
+      # FloatDomainError로 죽는다 — RangeError를 rescue에 추가하지 않으면 이 테스트가
+      # InvalidToken이 아니라 FloatDomainError로 실패한다.
+      token = raw_token_with_literal_field("exp", "1e400")
+
+      expect { described_class.decode(token, expected_type: "access") }.to raise_error(Auth::Tokens::InvalidToken)
+    end
+
+    it "rejects an infinite iat instead of crashing (F2)" do
+      # iat는 verify_iat를 안 켜서 ruby-jwt가 아예 손대지 않는다 — decode_payload는
+      # 크래시 없이 통과하고, typed_claims의 Time.at(raw_iat)에서 FloatDomainError가
+      # 난다. decode_payload의 rescue가 아니라 typed_claims 자체의 범위 검사가
+      # 막아야 하는 경로다.
+      token = raw_token_with_literal_field("iat", "1e400")
+
+      expect { described_class.decode(token, expected_type: "access") }.to raise_error(Auth::Tokens::InvalidToken)
+    end
+
+    it "rejects an exp so large it would never expire, even though Time.at accepts it (F3)" do
+      # Ruby의 Time.at(10**30)은 예외 없이 "서기 3경 년" Time을 만든다 — 이 검사가
+      # 없으면 이 토큰은 조용히 decode에 성공하고 사실상 영원히 유효하다.
+      token = raw_token(valid_payload("exp" => 10**30))
+
+      expect { described_class.decode(token, expected_type: "access") }.to raise_error(Auth::Tokens::InvalidToken)
+    end
+
+    it "rejects an iat so large it is nonsensical, symmetric with exp (F3)" do
+      token = raw_token(valid_payload("iat" => 10**30))
+
+      expect { described_class.decode(token, expected_type: "access") }.to raise_error(Auth::Tokens::InvalidToken)
+    end
+
+    it "accepts exp exactly at the canonical's datetime.max boundary and rejects one second past it" do
+      now = Time.now.to_i
+      at_boundary = raw_token(valid_payload("iat" => now, "exp" => Auth::Tokens::MAX_TIMESTAMP))
+      past_boundary = raw_token(valid_payload("iat" => now, "exp" => Auth::Tokens::MAX_TIMESTAMP + 1))
+
+      aggregate_failures do
+        expect { described_class.decode(at_boundary, expected_type: "access") }.not_to raise_error
+        expect { described_class.decode(past_boundary, expected_type: "access") }
+          .to raise_error(Auth::Tokens::InvalidToken)
+      end
+    end
+
+    it "rejects an infinite exp on the decode_expired_refresh path too (F2, verify_expiration off skips the gem's own crash but not ours)" do
+      past = Time.now.to_i - 2_000
+      token = raw_token_with_literal_field("exp", "1e400", "type" => "refresh", "iat" => past)
+
+      expect { described_class.decode_expired_refresh(token) }.to raise_error(Auth::Tokens::InvalidToken)
+    end
+
     it "rejects a garbage token string, an empty string, and nil without crashing" do
       aggregate_failures do
         expect { described_class.decode("not-a-jwt", expected_type: "access") }.to raise_error(Auth::Tokens::InvalidToken)
@@ -242,6 +311,26 @@ RSpec.describe Auth::Tokens do
     end
   end
 
+  # F4 (팀장 fix round 1): 이 조합을 Task 3가 그대로 의존한다 — refresh 회전은
+  # decode에서 TokenExpired를 받으면 decode_expired_refresh로 다시 시도해 세션을
+  # 회수한다. `exp: null`인 토큰은 ruby-jwt가 `nil.to_i == 0`으로 취급해 "무조건
+  # 이미 만료됨"으로 보므로 decode는 InvalidToken이 아니라 TokenExpired를 던진다
+  # (정본 PyJWT라면 InvalidToken이었을 지점이라 완전히 같은 분류는 아니다 — 팀장
+  # 지시대로 이 축은 고치지 않는다). 중요한 건 그다음이다: decode_expired_refresh는
+  # verify_expiration을 꺼서 이 nil을 만료 검사로는 안 보지만, typed_claims의
+  # "exp must be numeric"(nil.is_a?(Numeric)은 false)이 여전히 막는다 — 그래서
+  # 회전 경로 전체는 "제거하지 말고 손대지 말라"로 안전하게 수렴한다. 이 테스트가
+  # 없으면 두 메서드 중 하나의 동작이 바뀌어도(예: nil을 numeric 취급하도록 고치는
+  # 실수) 아무도 못 잡는다.
+  describe "decode → TokenExpired → decode_expired_refresh composition (Task 3's rotation depends on this)" do
+    it "decode reports TokenExpired for exp: null, and decode_expired_refresh on the same token still rejects it as InvalidToken" do
+      token = raw_token(valid_payload("type" => "refresh", "exp" => nil))
+
+      expect { described_class.decode(token, expected_type: "refresh") }.to raise_error(Auth::Tokens::TokenExpired)
+      expect { described_class.decode_expired_refresh(token) }.to raise_error(Auth::Tokens::InvalidToken)
+    end
+  end
+
   describe ".hash_refresh_token / .refresh_token_matches?" do
     it "hashes with SHA-256 hex" do
       token = "some-refresh-token-value"
@@ -268,6 +357,24 @@ RSpec.describe Auth::Tokens do
       expect(ActiveSupport::SecurityUtils).to receive(:secure_compare).and_call_original
 
       described_class.refresh_token_matches?("token", described_class.hash_refresh_token("token"))
+    end
+  end
+
+  # F5 (팀장 fix round 1): module_function은 뒤에 정의되는 메서드를 전부 public
+  # 모듈 함수로도 만든다 — private_class_method로 다시 감추지 않으면 서명 검증을
+  # 건너뛰고 `Auth::Tokens.typed_claims({"sub" => "victim", ...}, expected_type:
+  # "access")`처럼 인증되지 않은 신원을 담은 Claims를 그냥 만들 수 있었다.
+  describe "internal helpers are not part of the public API" do
+    it "does not expose decode_payload or typed_claims outside the module" do
+      aggregate_failures do
+        expect { described_class.decode_payload("x", verify_expiration: true) }.to raise_error(NoMethodError, /private method 'decode_payload'/)
+        expect { described_class.typed_claims({ "sub" => "victim" }, expected_type: "access") }
+          .to raise_error(NoMethodError, /private method 'typed_claims'/)
+      end
+    end
+
+    it "keeps config public because specs read real settings through it" do
+      expect { described_class.config }.not_to raise_error
     end
   end
 end

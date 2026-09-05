@@ -30,6 +30,16 @@ module Auth
     # jti는 전부 이 형식이므로, decode 쪽도 이 형식만 "UUID로 파싱된다"로 받아들인다.
     JTI_PATTERN = /\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
 
+    # Ruby의 Time.at은 임의의 bignum이나 ±Infinity/NaN까지 받아들이려 든다(±Infinity·
+    # NaN은 FloatDomainError로 죽지만, 10**30처럼 터무니없이 큰 유한수는 예외 없이
+    # "서기 3경 년" 같은 Time을 그냥 만들어 버린다 — 절대 만료되지 않는 토큰이 조용히
+    # 생긴다). 정본은 datetime.fromtimestamp가 알아서 이 범위를 막아 주지만
+    # (datetime.min/max 밖이면 raise) Ruby에는 그런 안전장치가 없어 직접 막는다. 경계는
+    # 정본의 datetime.min/datetime.max와 맞췄다 — datetime(1,1,1)과
+    # datetime(9999,12,31,23,59,59)의 UTC epoch초.
+    MIN_TIMESTAMP = -62_135_596_800
+    MAX_TIMESTAMP = 253_402_300_799
+
     module_function
 
     def create(subject, type:, jti: nil, now: nil)
@@ -81,15 +91,17 @@ module Auth
       }).first
     rescue JWT::ExpiredSignature
       raise TokenExpired
-    rescue JWT::DecodeError, NoMethodError, TypeError
+    rescue JWT::DecodeError, NoMethodError, TypeError, RangeError
       # ruby-jwt 3.2.0을 컨테이너에서 실측: exp가 boolean이면 내장
       # Claims::Expiration이 `payload['exp'].to_i`를 그대로 호출해 NoMethodError로
       # 죽는다(JWT::DecodeError 계열이 아니다). payload가 JSON 객체가 아니라
       # 배열이면 다른 내장 검증기가 `payload['aud']`류 호출에서 TypeError를 낸다.
-      # 둘 다 서명 위조·필수 클레임 누락과 본질이 같은 "이 토큰을 신뢰할 수 없다"
-      # 이므로 InvalidToken으로 옮긴다. JWT::ExpiredSignature가 JWT::DecodeError의
-      # 서브클래스라 위 rescue보다 먼저 와야 한다 — 순서를 바꾸면 만료가
-      # InvalidToken으로 뭉개져 회전 로직이 재로그인과 갱신 가능을 구분하지 못한다.
+      # exp가 1e400처럼 JSON에서 Infinity로 파싱되는 값이면 같은 `.to_i` 호출이
+      # FloatDomainError(RangeError의 서브클래스)로 죽는다. 셋 다 서명 위조·필수
+      # 클레임 누락과 본질이 같은 "이 토큰을 신뢰할 수 없다"이므로 InvalidToken으로
+      # 옮긴다. JWT::ExpiredSignature가 JWT::DecodeError의 서브클래스라 위 rescue보다
+      # 먼저 와야 한다 — 순서를 바꾸면 만료가 InvalidToken으로 뭉개져 회전 로직이
+      # 재로그인과 갱신 가능을 구분하지 못한다.
       raise InvalidToken
     end
 
@@ -121,6 +133,16 @@ module Auth
       # `.to_i`로 조용히 통과하지만, 여기서는 Numeric이 아니라서 잡힌다).
       raise InvalidToken, "iat must be numeric" unless raw_iat.is_a?(Numeric)
       raise InvalidToken, "exp must be numeric" unless raw_exp.is_a?(Numeric)
+      # exp가 1e400(JSON에서 Infinity로 파싱된다)이면 decode_payload의 내장
+      # 만료 검사가 먼저 크래시해 여기까지 안 온다(위 rescue가 잡는다). 하지만
+      # iat는 ruby-jwt가 아예 손대지 않고(verify_iat를 안 켰다), verify_expiration을
+      # 끄는 decode_expired_refresh 경로에서는 exp도 이 메서드까지 그대로 넘어온다
+      # — 그래서 Infinity/NaN, 그리고 10**30처럼 유한하지만 터무니없이 큰 값(Ruby의
+      # Time.at은 예외 없이 받아 준다 — "서기 3경 년" Time이 조용히 생겨 절대
+      # 만료되지 않는 토큰이 된다)을 여기서 직접 막는다. finite?가 먼저 와야 한다
+      # — Float::NAN.between?(a, b)는 false가 아니라 ArgumentError를 낸다.
+      raise InvalidToken, "iat out of range" unless raw_iat.finite? && raw_iat.between?(MIN_TIMESTAMP, MAX_TIMESTAMP)
+      raise InvalidToken, "exp out of range" unless raw_exp.finite? && raw_exp.between?(MIN_TIMESTAMP, MAX_TIMESTAMP)
       # ruby-jwt의 Claims::Audience#verify!는 `([*aud] & [*expected]).empty?`로
       # 판단한다(jwt/claims/audience.rb) — token의 aud가 배열이고 그중 하나만
       # 우리 audience와 같아도 통과시키는 "포함" 검사다. 컨테이너에서 직접 확인:
@@ -144,5 +166,14 @@ module Auth
     def config
       Rails.application.config.x.auth
     end
+
+    # decode_payload/typed_claims는 서명 검증 이전 단계를 손으로 조립할 수 있게
+    # 노출되면 안 된다 — module_function은 그 뒤에 정의되는 메서드를 전부 public
+    # 모듈 함수로도 만들어서, 여기서 private_class_method로 다시 감추지 않으면
+    # `Auth::Tokens.typed_claims({"sub" => "victim", ...}, expected_type: "access")`
+    # 처럼 서명 없이 Claims를 조작해 만들 수 있었다(정본이 _typed_claims로 언더스코어
+    # 접두해 막는 것과 같은 이유). config는 스펙이 실제 설정 값을 읽으려고 직접
+    # 부르므로 public으로 남긴다.
+    private_class_method :decode_payload, :typed_claims
   end
 end
