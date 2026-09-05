@@ -21,6 +21,11 @@ Rails.application.routes.draw do
       end
       patch "examples/:id", to: "examples#update"
       put "examples/:id", to: "examples#upsert"
+
+      # 읽기 전용 참조 자원. Rails에서 "읽기 전용"은 여기서 정한다 — only: %i[index show]가
+      # 그 전부이고, CrudActions가 물려준 write 액션은 라우트가 없어 도달할 수 없다.
+      resources :categories, only: %i[index show], controller: "example_categories"
+      resources :tags, only: %i[index show], controller: "example_tags"
     end
   end
 

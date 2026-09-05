@@ -57,6 +57,14 @@ RSpec.describe "Swagger contract" do
       .to eq("#/components/schemas/TagsRelationshipDocument")
     expect(response_schema_ref("/api/v1/examples/{id}/tags", :get, "200"))
       .to eq("#/components/schemas/TagCollectionDocument")
+    expect(response_schema_ref("/api/v1/categories", :get, "200"))
+      .to eq("#/components/schemas/ExampleCategoryCollectionDocument")
+    expect(response_schema_ref("/api/v1/categories/{id}", :get, "200"))
+      .to eq("#/components/schemas/ExampleCategoryDocument")
+    expect(response_schema_ref("/api/v1/tags", :get, "200"))
+      .to eq("#/components/schemas/ExampleTagCollectionDocument")
+    expect(response_schema_ref("/api/v1/tags/{id}", :get, "200"))
+      .to eq("#/components/schemas/ExampleTagDocument")
   end
 
   it "describes collection, linkage, and related data with different JSON:API shapes" do

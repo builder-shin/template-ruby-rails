@@ -217,6 +217,60 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/TagCollectionDocument"
+  "/api/v1/categories":
+    get:
+      summary: Category 목록 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleCategoryCollectionDocument"
+  "/api/v1/categories/{id}":
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: Category 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleCategoryDocument"
+  "/api/v1/tags":
+    get:
+      summary: Tag 목록 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleTagCollectionDocument"
+  "/api/v1/tags/{id}":
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    get:
+      summary: Tag 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ExampleTagDocument"
 components:
   securitySchemes:
     cookieAuth:
@@ -364,6 +418,7 @@ components:
       - type: object
         required:
         - attributes
+        - links
         properties:
           attributes:
             type: object
@@ -372,12 +427,15 @@ components:
             properties:
               name:
                 type: string
+          links:
+            type: object
     ExampleTagResource:
       allOf:
       - "$ref": "#/components/schemas/ExampleTagIdentifier"
       - type: object
         required:
         - attributes
+        - links
         properties:
           attributes:
             type: object
@@ -386,6 +444,8 @@ components:
             properties:
               name:
                 type: string
+          links:
+            type: object
     ExampleRelationships:
       type: object
       required:
@@ -600,3 +660,57 @@ components:
           type: array
           items:
             "$ref": "#/components/schemas/ExampleTagResource"
+    ExampleCategoryDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          "$ref": "#/components/schemas/ExampleCategoryResource"
+    ExampleCategoryCollectionDocument:
+      type: object
+      required:
+      - data
+      - links
+      properties:
+        data:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ExampleCategoryResource"
+        meta:
+          type: object
+          required:
+          - totalCount
+          properties:
+            totalCount:
+              type: integer
+              minimum: 0
+        links:
+          type: object
+    ExampleTagDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          "$ref": "#/components/schemas/ExampleTagResource"
+    ExampleTagCollectionDocument:
+      type: object
+      required:
+      - data
+      - links
+      properties:
+        data:
+          type: array
+          items:
+            "$ref": "#/components/schemas/ExampleTagResource"
+        meta:
+          type: object
+          required:
+          - totalCount
+          properties:
+            totalCount:
+              type: integer
+              minimum: 0
+        links:
+          type: object
