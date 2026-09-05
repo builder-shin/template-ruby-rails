@@ -25,21 +25,27 @@ module Jsonapi
 
     # `next`는 probe 행의 유무로 판정한다. `last`는 총 개수를 알아야 만들 수 있으므로
     # `page[totals]=true`로 COUNT를 실행한 요청에서만 나온다 — 그 외에는 nil이다.
-    def links(request:, raw_pairs:, page_number:, page_size:, has_more:, total_count:)
+    #
+    # `totals`는 `total_count`(nil일 수도, 0일 수도 있는 COUNT 결과)가 아니라 요청 자체가
+    # totals를 요청했는지를 나타낸다 — 둘을 섞으면 빈 컬렉션에 대한 totals 요청
+    # (total_count == 0)에서 링크의 page[totals]=true가 빠지는 잘못이 생긴다.
+    def links(request:, raw_pairs:, page_number:, page_size:, has_more:, total_count:, totals:)
       last_page = total_count && [ 1, (total_count + page_size - 1) / page_size ].max
       {
-        "self" => page_link(request, raw_pairs, page_number, page_size),
-        "first" => page_link(request, raw_pairs, 1, page_size),
-        "prev" => page_number > 1 ? page_link(request, raw_pairs, page_number - 1, page_size) : nil,
-        "next" => has_more ? page_link(request, raw_pairs, page_number + 1, page_size) : nil,
-        "last" => last_page ? page_link(request, raw_pairs, last_page, page_size) : nil
+        "self" => page_link(request, raw_pairs, page_number, page_size, totals: totals),
+        "first" => page_link(request, raw_pairs, 1, page_size, totals: totals),
+        "prev" => page_number > 1 ? page_link(request, raw_pairs, page_number - 1, page_size, totals: totals) : nil,
+        "next" => has_more ? page_link(request, raw_pairs, page_number + 1, page_size, totals: totals) : nil,
+        "last" => last_page ? page_link(request, raw_pairs, last_page, page_size, totals: totals) : nil
       }
     end
 
-    def page_link(request, raw_pairs, number, size)
+    # 순서는 정본과 맞춘다: 보존된 비-page 파라미터 → page[totals] → page[number] → page[size].
+    def page_link(request, raw_pairs, number, size, totals:)
       preserved = raw_pairs.reject { |parameter, _| parameter == "page" || parameter.start_with?("page[") }
+      totals_pair = totals ? [ [ "page[totals]", "true" ] ] : []
       query = URI.encode_www_form(
-        [ *preserved, [ "page[number]", number.to_s ], [ "page[size]", size.to_s ] ]
+        [ *preserved, *totals_pair, [ "page[number]", number.to_s ], [ "page[size]", size.to_s ] ]
       )
       "#{request.path}?#{query}"
     end

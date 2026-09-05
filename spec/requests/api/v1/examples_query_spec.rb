@@ -591,6 +591,21 @@ RSpec.describe "Example JSON:API pagination contract", type: :request do
     expect(decoded_link_query(document.fetch("links").fetch("last"))).to include("page[number]" => "2")
   end
 
+  it "preserves page[totals]=true across every pagination link" do
+    # next/prev/first/last/self 전부가 page[totals]=true를 그대로 들고 있어야
+    # 그 링크를 따라간 다음 요청에서도 totals가 끊기지 않는다 — 정본과 같은 계약이다.
+    create_list(:example, 5)
+
+    get "/api/v1/examples?page[totals]=true&page[number]=2&page[size]=1", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    links = document.fetch("links")
+    expect(links.keys).to eq(%w[self first prev next last])
+    links.each_value do |link|
+      expect(decoded_link_query(link)).to include("page[totals]" => "true")
+    end
+  end
+
   it "decides next from a probe row rather than a count" do
     # 요청 크기 +1행을 읽어 next 유무를 판정하고 그 한 행은 응답에서 버린다.
     create_list(:example, 3)

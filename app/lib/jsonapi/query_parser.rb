@@ -76,7 +76,8 @@ module Jsonapi
           page_number: @page_number,
           page_size: @page_size,
           has_more: has_more,
-          total_count: total_count
+          total_count: total_count,
+          totals: @totals
         ),
         include_requested: !@includes.nil?
       )
