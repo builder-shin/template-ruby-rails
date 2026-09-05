@@ -48,5 +48,52 @@ module Jsonapi
       )
       "#{request.path}?#{query}"
     end
+
+    # 커서 링크는 페이지 번호가 아니라 경계 행의 정렬 값으로 만든다. 마지막 행이
+    # 다음 페이지의 시작이고 첫 행이 이전 페이지의 끝이다.
+    #
+    # `prev`/`next`의 발행 조건이 방향에 따라 뒤바뀐다. 앞으로 읽는 중이면 "다음"은
+    # probe가 알려주고 "이전"은 우리가 어디선가 왔다는 사실이 알려준다. 뒤로 읽는
+    # 중이면 정반대다. 빈 커서(`page[after]=`)로 시작한 요청은 컬렉션의 처음이므로
+    # `prev`가 없다 — offset 모드 1페이지가 `prev`를 내지 않는 것과 같다.
+    def cursor_links(request:, raw_pairs:, page_size:, totals:, records:, terms:,
+                     attributes:, has_more:, before:, raw_cursor:)
+      preserved = raw_pairs.reject { |parameter, _| parameter == "page" || parameter.start_with?("page[") }
+      signature = Cursor.signature(terms)
+      positioned = !raw_cursor.empty?
+      emit_next = before ? positioned : has_more
+      emit_prev = before ? has_more : positioned
+
+      previous_cursor = records.empty? ? nil : boundary_cursor(signature, terms, attributes, records.first)
+      following_cursor = records.empty? ? nil : boundary_cursor(signature, terms, attributes, records.last)
+
+      {
+        "self" => cursor_link(request, preserved, page_size, totals,
+                              before ? "page[before]" : "page[after]", raw_cursor),
+        "first" => cursor_link(request, preserved, page_size, totals, "page[after]", ""),
+        "prev" => emit_prev && previous_cursor ?
+          cursor_link(request, preserved, page_size, totals, "page[before]", previous_cursor) : nil,
+        "next" => emit_next && following_cursor ?
+          cursor_link(request, preserved, page_size, totals, "page[after]", following_cursor) : nil,
+        # 빈 문자열이 컬렉션의 끝을 가리키므로 총 개수를 몰라도 `last`를 만들 수 있다.
+        "last" => cursor_link(request, preserved, page_size, totals, "page[before]", "")
+      }
+    end
+
+    def boundary_cursor(signature, terms, attributes, record)
+      values = terms.map do |term|
+        value = record.public_send(attributes.fetch(term.name))
+        raise Cursor.invalid_cursor unless Cursor.encodable?(value)
+
+        Cursor.serialize(value)
+      end
+      Cursor.encode(signature, values)
+    end
+
+    def cursor_link(request, preserved, page_size, totals, parameter, value)
+      totals_pair = totals ? [ [ "page[totals]", "true" ] ] : []
+      pairs = [ *preserved, *totals_pair, [ parameter, value ], [ "page[size]", page_size.to_s ] ]
+      "#{request.path}?#{URI.encode_www_form(pairs)}"
+    end
   end
 end
