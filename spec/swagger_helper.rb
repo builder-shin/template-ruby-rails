@@ -347,7 +347,7 @@ RSpec.configure do |config|
           },
           ExampleCollectionDocument: {
             type: "object",
-            required: %w[data meta links],
+            required: %w[data links],
             properties: {
               data: {
                 type: "array",

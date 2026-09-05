@@ -39,8 +39,9 @@ module Jsonapi
       @sort_terms = nil
       @includes = nil
       @page_number = 1
-      @page_size = contract.fetch(:default_page_size, Pagination::DEFAULT_PAGE_SIZE)
+      @page_size = contract.fetch(:default_page_size)
       @seen_page_parameters = Set.new
+      @totals = false
     end
 
     def call
@@ -53,16 +54,30 @@ module Jsonapi
       validate_page_offset!
 
       filtered = apply_filters(@scope)
-      total_count = filtered.unscope(:order).count
-      paginated = apply_pagination(apply_sort(filtered))
+      total_count = @totals ? filtered.unscope(:order).count : nil
+      sorted = apply_sort(filtered)
+
+      # 요청 크기 +1행을 읽어 next 유무를 판정하고 그 한 행은 응답에서 버린다.
+      # COUNT 없이 "다음 페이지가 있는가"에 답하는 방법이다.
+      probed = Pagination.apply(sorted, page_number: @page_number, page_size: @page_size, limit: @page_size + 1).to_a
+      has_more = probed.length > @page_size
+      page_records = has_more ? probed.first(@page_size) : probed
+
       requested_includes = @includes || []
-      paginated = paginated.includes(*requested_includes.map(&:to_sym)) if requested_includes.any?
+      page_records = preload_includes(page_records, requested_includes) if requested_includes.any?
 
       QueryResult.new(
-        scope: paginated,
+        scope: page_records,
         includes: requested_includes,
         total_count: total_count,
-        links: pagination_links(total_count),
+        links: Pagination.links(
+          request: @request,
+          raw_pairs: @raw_pairs,
+          page_number: @page_number,
+          page_size: @page_size,
+          has_more: has_more,
+          total_count: total_count
+        ),
         include_requested: !@includes.nil?
       )
     end
@@ -223,17 +238,31 @@ module Jsonapi
     end
 
     def parse_page(parameter, raw_value)
-      unless %w[page[number] page[size]].include?(parameter) && !@seen_page_parameters.include?(parameter)
+      unless %w[page[number] page[size] page[totals]].include?(parameter) &&
+             !@seen_page_parameters.include?(parameter)
         invalid_query!("INVALID_PAGE", parameter)
       end
 
       @seen_page_parameters << parameter
+
+      if parameter == "page[totals]"
+        @totals = parse_boolean(raw_value, parameter)
+        return
+      end
+
       value = parse_positive_integer(raw_value, parameter)
       if parameter == "page[number]"
         @page_number = value
       else
         @page_size = [ value, Pagination::MAX_PAGE_SIZE ].min
       end
+    end
+
+    def parse_boolean(raw_value, parameter)
+      return true if raw_value == "true"
+      return false if raw_value == "false"
+
+      invalid_query!("INVALID_PAGE", parameter)
     end
 
     def parse_positive_integer(raw_value, parameter)
@@ -324,18 +353,15 @@ module Jsonapi
       term.descending ? column.desc : column.asc
     end
 
-    def apply_pagination(scope)
-      Pagination.apply(scope, page_number: @page_number, page_size: @page_size)
-    end
-
-    def pagination_links(total_count)
-      Pagination.links(
-        request: @request,
-        raw_pairs: @raw_pairs,
-        page_number: @page_number,
-        page_size: @page_size,
-        total_count: total_count
-      )
+    # probe가 relation을 배열로 만들었으므로 `includes`를 relation에 걸 수 없다.
+    # 이미 가져온 레코드에 preloader를 직접 물린다 — N+1을 막는 것이 목적이고
+    # 그 목적은 relation이든 배열이든 같다.
+    def preload_includes(records, paths)
+      ActiveRecord::Associations::Preloader.new(
+        records: records,
+        associations: paths.map(&:to_sym)
+      ).call
+      records
     end
 
     def invalid_query!(code, parameter)

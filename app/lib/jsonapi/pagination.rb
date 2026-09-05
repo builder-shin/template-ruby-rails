@@ -5,8 +5,10 @@ require "uri"
 module Jsonapi
   # offset 페이지네이션의 scope 적용과 링크 조립.
   #
-  # Task 3이 여기에 probe(요청 크기 +1행을 읽어 `next` 유무를 판정)를 얹는다.
-  # 지금은 `QueryParser`에서 그대로 옮겨 온 로직뿐이다.
+  # `next`는 probe(요청 크기 +1행을 읽어 유무를 판정)로 정해지고, `last`는
+  # `page[totals]=true`가 실행한 COUNT가 있을 때만 나온다. 실제 COUNT 실행과
+  # probe 조회는 `QueryParser`가 하고, 여기는 그 결과로 scope를 자르고
+  # 링크를 조립하는 순수 함수만 담는다.
   module Pagination
     DEFAULT_PAGE_SIZE = 20
     MAX_PAGE_SIZE = 100
@@ -14,18 +16,23 @@ module Jsonapi
 
     module_function
 
-    def apply(scope, page_number:, page_size:)
-      scope.offset((page_number - 1) * page_size).limit(page_size)
+    # `limit`은 probe가 요청 크기보다 한 행 더 읽을 때만 `page_size`와 달라진다.
+    # offset은 항상 실제 페이지 크기(`page_size`) 기준이어야 한다 — limit을 offset
+    # 계산에도 함께 쓰면 2페이지부터 창이 그만큼씩 밀린다.
+    def apply(scope, page_number:, page_size:, limit: page_size)
+      scope.offset((page_number - 1) * page_size).limit(limit)
     end
 
-    def links(request:, raw_pairs:, page_number:, page_size:, total_count:)
-      last_page = [ 1, (total_count + page_size - 1) / page_size ].max
+    # `next`는 probe 행의 유무로 판정한다. `last`는 총 개수를 알아야 만들 수 있으므로
+    # `page[totals]=true`로 COUNT를 실행한 요청에서만 나온다 — 그 외에는 nil이다.
+    def links(request:, raw_pairs:, page_number:, page_size:, has_more:, total_count:)
+      last_page = total_count && [ 1, (total_count + page_size - 1) / page_size ].max
       {
         "self" => page_link(request, raw_pairs, page_number, page_size),
         "first" => page_link(request, raw_pairs, 1, page_size),
         "prev" => page_number > 1 ? page_link(request, raw_pairs, page_number - 1, page_size) : nil,
-        "next" => page_number < last_page ? page_link(request, raw_pairs, page_number + 1, page_size) : nil,
-        "last" => page_link(request, raw_pairs, last_page, page_size)
+        "next" => has_more ? page_link(request, raw_pairs, page_number + 1, page_size) : nil,
+        "last" => last_page ? page_link(request, raw_pairs, last_page, page_size) : nil
       }
     end
 

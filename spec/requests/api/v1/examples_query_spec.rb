@@ -294,7 +294,8 @@ RSpec.describe "Example JSON:API query contract", type: :request do
   it "uses default and maximum page sizes with totalCount and boundary links" do
     create_list(:example, 97)
 
-    first_page = request_document
+    # totalCount와 last 링크가 이 테스트의 주제이므로 page[totals]=true로 요청한다.
+    first_page = request_document("page[totals]=true")
     expect(first_page.fetch("data").size).to eq(20)
     expect(first_page.fetch("meta")).to eq("totalCount" => 101)
     expect(first_page.fetch("links").keys).to eq(%w[self first prev next last])
@@ -305,7 +306,7 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     )
     expect(decoded_link_query(first_page.dig("links", "last"))).to include("page[number]" => "6")
 
-    maximum_page = request_document("page[size]=200")
+    maximum_page = request_document("page[totals]=true&page[size]=200")
     expect(maximum_page.fetch("data").size).to eq(100)
     expect(maximum_page.fetch("meta")).to eq("totalCount" => 101)
     expect(decoded_link_query(maximum_page.dig("links", "self"))).to include("page[size]" => "100")
@@ -317,7 +318,9 @@ RSpec.describe "Example JSON:API query contract", type: :request do
   end
 
   it "preserves non-page query parameters in every pagination link and uses null boundaries" do
-    query = "filter[status][in]=draft,active&sort=title&include=category&page[number]=2&page[size]=1"
+    # last 링크가 모든 링크 종류를 도는 루프의 대상이므로 page[totals]=true로 요청한다.
+    query = "page[totals]=true&filter[status][in]=draft,active&sort=title&include=category" \
+            "&page[number]=2&page[size]=1"
     document = request_document(query)
     links = document.fetch("links")
     expected_pages = { "self" => "2", "first" => "1", "prev" => "1", "next" => "3", "last" => "3" }
@@ -554,5 +557,79 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     expect(contract.fetch(:default_sort)).to eq([ { field: "createdAt", direction: :desc } ])
     expect(contract.fetch(:tie_breaker)).to eq({ field: "id", direction: :asc })
     expect(contract.fetch(:default_page_size)).to eq(20)
+  end
+end
+
+RSpec.describe "Example JSON:API pagination contract", type: :request do
+  # page_link이 URI.encode_www_form으로 대괄호를 퍼센트 인코딩하므로
+  # 링크 문자열을 리터럴로 비교하지 않고 쿼리를 디코딩해 비교한다.
+  def decoded_link_query(link)
+    URI.decode_www_form(URI.parse(link).query).to_h
+  end
+
+  it "omits totals and the last link unless page[totals] asks for them" do
+    # COUNT는 큰 테이블에서 목록 조회보다 비싸질 수 있다. 필요하다고 말한 요청에만
+    # 실행한다 — 정본과 같은 계약이다.
+    create_list(:example, 3)
+
+    get "/api/v1/examples", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(document).not_to have_key("meta")
+    expect(document.fetch("links").fetch("last")).to be_nil
+  end
+
+  it "returns totals and a last link when page[totals] is true" do
+    create_list(:example, 3)
+
+    get "/api/v1/examples?page[totals]=true&page[size]=2", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(document.fetch("meta")).to eq("totalCount" => 3)
+    expect(decoded_link_query(document.fetch("links").fetch("last"))).to include("page[number]" => "2")
+  end
+
+  it "decides next from a probe row rather than a count" do
+    # 요청 크기 +1행을 읽어 next 유무를 판정하고 그 한 행은 응답에서 버린다.
+    create_list(:example, 3)
+
+    get "/api/v1/examples?page[size]=2", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(document.fetch("data").length).to eq(2)
+    expect(decoded_link_query(document.fetch("links").fetch("next"))).to include("page[number]" => "2")
+
+    get "/api/v1/examples?page[size]=3", headers: jsonapi_headers
+
+    expect(JSON.parse(response.body).fetch("links").fetch("next")).to be_nil
+  end
+
+  it "rejects a non-boolean page[totals]" do
+    get "/api/v1/examples?page[totals]=yes", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("INVALID_PAGE")
+  end
+
+  it "omits meta from an empty collection unless page[totals] asks for it" do
+    # 짧은 경로(빈 컬렉션)는 render의 short-circuit(`options.slice(:meta, :links).compact`)을
+    # 지난다. `meta`가 없을 때 `{}`로 새지 않는지 여기서 확인한다.
+    get "/api/v1/examples", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(document.fetch("data")).to eq([])
+    expect(document).not_to have_key("meta")
+  end
+
+  it "reports zero totalCount for an empty collection when page[totals] is true" do
+    get "/api/v1/examples?page[totals]=true", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(document.fetch("data")).to eq([])
+    expect(document.fetch("meta")).to eq("totalCount" => 0)
   end
 end

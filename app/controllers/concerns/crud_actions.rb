@@ -57,9 +57,12 @@ module CrudActions
 
   def render_jsonapi_query_index(scope)
     result = jsonapi_query(scope)
-    render jsonapi: result.scope.load,
+    # meta를 옵션에서 빼는 것만으로는 안 된다 — jsonapi.rb의 add_renderer!가
+    # options[:meta] ||= jsonapi_meta(resource)로 되채운다. 아래 jsonapi_meta
+    # 오버라이드가 이 경로를 계약에 맞게 가로챈다.
+    @jsonapi_query_meta = result.total_count.nil? ? nil : { totalCount: result.total_count }
+    render jsonapi: result.scope,
            include: result.includes.map(&:to_sym),
-           meta: { totalCount: result.total_count },
            links: result.links
 
     ensure_included_array! if result.include_requested
@@ -130,6 +133,12 @@ module CrudActions
   end
 
   def jsonapi_meta(resources)
+    # render_jsonapi_query_index가 이 ivar를 정의해 둔다 — nil이면(page[totals] 없이
+    # 요청됐거나 빈 컬렉션이면) meta 자체가 없어야 하므로 nil을 그대로 돌려준다.
+    # jsonapi.rb의 렌더러는 `nil`을 빈 컬렉션 short-circuit에서 `.compact`로 걸러 내고,
+    # 그 외에는 `.present?`가 false라 키 자체를 넣지 않는다.
+    return @jsonapi_query_meta if defined?(@jsonapi_query_meta)
+
     total = jsonapi_pagination_meta(resources)[:records]
     { "total-count" => total }
   end
