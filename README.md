@@ -116,6 +116,15 @@ curl -fsS \
 (`/api/v1/auth/refresh`), 더 이상 필요 없어지면 같은 `refreshToken`으로 로그아웃합니다
 (`/api/v1/auth/logout`, 204, 본문 없음).
 
+`refreshToken`은 클라이언트의 보안 저장소에 안전하게 보관해야 합니다. 서버는 토큰을
+cookie에 저장하지 않고 JSON body로만 발급하며, 인증도 `Authorization` 헤더로만 받습니다.
+위 `ACCESS_TOKEN` 같은 shell 변수는 예제 요청을 마친 뒤 `unset`하거나 shell을 종료합니다.
+
+`logout`은 refresh session만 폐기합니다 — **이미 발급된 access token은 폐기되지 않고
+만료될 때까지 그대로 유효합니다**(`JWT_ACCESS_EXPIRES_SECONDS`, 기본 `900`초이므로 최대
+15분). 로그아웃 즉시 모든 접근을 끊어야 하는 서비스라면 access token 수명을 더 줄이거나
+별도의 폐기 목록을 두어야 합니다.
+
 로그인과 회전마다 `refresh_sessions`에 행이 쌓이고 로그아웃은 `revoked_at`만 표시하므로,
 `PurgeExpiredRefreshSessionsJob`이 만료된 지 `REFRESH_SESSION_RETENTION_SECONDS`(기본 7일)를
 넘긴 행을 오래된 순서로 배치 삭제합니다. 일정은 `config/sidekiq_cron.yml`에 있고 `worker`
