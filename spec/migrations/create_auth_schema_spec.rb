@@ -241,4 +241,34 @@ RSpec.describe "CreateAuthSchema migration" do
       expect(@connection.tables).not_to include("users", "refresh_sessions")
     end
   end
+
+  # 위 컨텍스트는 예제마다 새로 만드는 격리된 스키마에 마이그레이션 파일을 직접
+  # 재생해서 검증한다 — db/schema.rb는 전혀 읽지 않는다. 그런데 이 스위트가 실제로
+  # 도는 테스트 DB는 로컬에서는 db:migrate로, CI(.github/workflows/ci.yml)에서는
+  # db:create + db:schema:load로 만들어진다. 즉 db/schema.rb와 마이그레이션 파일은
+  # 독립적으로 손댈 수 있는 두 산출물인데, 검증하는 건 마이그레이션 파일뿐이었다.
+  #
+  # 예를 들어 누군가 db/schema.rb에서 "불필요해 보이는" `default: nil`만 지우고
+  # 마이그레이션 파일은 그대로 둔다면: 위 컨텍스트는 여전히 초록이고(마이그레이션
+  # 파일은 안 바뀌었으니), 모델/factory spec들도 여전히 초록이다(factory가 항상
+  # id를 명시적으로 채우므로 DB 기본값 유무와 무관하게 통과한다). 그 사이 CI가
+  # db:schema:load로 만드는 실제 DB는 refresh_sessions.id에 gen_random_uuid()
+  # 기본값을 다시 갖게 되어, 이 태스크가 막으려던 사고(빠뜨린 id가 조용히
+  # 무관한 UUID로 채워지는 것)가 그대로 재현된다 — 아무 spec도 이를 못 잡는다.
+  #
+  # 그래서 이 블록은 격리된 스키마가 아니라 이 프로세스가 실제로 물려 있는
+  # ActiveRecord::Base.connection을 직접 본다. db:migrate로 만들어졌든
+  # db:schema:load로 만들어졌든 상관없이, "이 테스트 스위트가 지금 돌고 있는
+  # 바로 그 DB"의 실제 상태를 확인한다.
+  context "against the database this test suite is actually running on" do
+    it "gives users.id a database default but leaves refresh_sessions.id without one" do
+      connection = ActiveRecord::Base.connection
+
+      users_id = connection.columns("users").find { |column| column.name == "id" }
+      refresh_sessions_id = connection.columns("refresh_sessions").find { |column| column.name == "id" }
+
+      expect(users_id.default_function).to eq("gen_random_uuid()")
+      expect(refresh_sessions_id.default_function).to be_nil
+    end
+  end
 end
