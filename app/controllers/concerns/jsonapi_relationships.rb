@@ -60,9 +60,53 @@ module JsonapiRelationships
     policy = relationship_policy(name)
     model = relationship_parent
     related = model.public_send(policy.fetch(:association))
-    payload = policy.fetch(:serializer).new(related).serializable_hash
+
+    payload =
+      if policy.fetch(:cardinality) == :many
+        related_collection_payload(policy, related)
+      else
+        policy.fetch(:serializer).new(related).serializable_hash
+      end
 
     render_jsonapi_payload(payload, status: :ok)
+  end
+
+  # to-many related-resource URL의 페이지네이션.
+  #
+  # `validate_related_collection_query!`(jsonapi_query.rb)가 before_action에서 이미
+  # 파싱해 둔 page[number]/page[size]를 그대로 쓴다 — 같은 쿼리 문자열을 여기서
+  # 다시 파싱하지 않는다.
+  #
+  # 이미 로드된 배열을 자르는 대신 질의한다: `association`은 ActiveRecord relation이라
+  # `.order(:id).offset(...).limit(...)`이 배열 슬라이스보다 싸고 코드도 짧다. 정렬은
+  # 대상의 기본키 오름차순으로 고정한다 — 그렇지 않으면 페이지 경계가 요청마다
+  # 흔들릴 수 있다.
+  #
+  # `render_jsonapi_payload`는 `jsonapi.rb`의 렌더러를 거치지 않고 이 해시를 그대로
+  # JSON으로 직렬화하므로(`jsonapi_meta` 백필이 적용되지 않으므로), links·meta를
+  # 여기서 직접 채운다. `meta.totalCount`는 이 라우트에서 항상 낸다 — 정본과 같이
+  # `page[totals]`를 받지 않고도 총 개수를 낸다.
+  def related_collection_payload(policy, association)
+    page_number = @related_collection_page_number
+    page_size = @related_collection_page_size
+    total_count = association.count
+    paged = Jsonapi::Pagination.apply(association.order(:id), page_number: page_number, page_size: page_size)
+    has_more = page_number * page_size < total_count
+
+    payload = policy.fetch(:serializer).new(paged).serializable_hash
+    payload[:links] = Jsonapi::Pagination.links(
+      request: request,
+      raw_pairs: [],
+      page_number: page_number,
+      page_size: page_size,
+      has_more: has_more,
+      total_count: total_count,
+      # 이 라우트는 page[totals]를 받지 않으므로 링크에도 echo하지 않는다 —
+      # totals: true로 두면 이 라우트가 거부하는 자신의 self/next 링크를 만들게 된다.
+      totals: false
+    )
+    payload[:meta] = { totalCount: total_count }
+    payload
   end
 
   def mutate_relationship(name, mutation)

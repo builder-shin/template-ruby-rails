@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "uri"
 
 RSpec.describe "Example relationships", type: :request do
   let(:collection_path) { "/api/v1/examples" }
@@ -33,6 +34,10 @@ RSpec.describe "Example relationships", type: :request do
     error = parsed_body.fetch("errors").first
     expect(error).to include("status" => Rack::Utils.status_code(status).to_s, "code" => code)
     expect(error["source"]).to eq("pointer" => pointer) if pointer
+  end
+
+  def decoded_link_query(link)
+    URI.decode_www_form(URI.parse(link).query).to_h
   end
 
   it "replaces, reads, and clears the category relationship" do
@@ -152,6 +157,56 @@ RSpec.describe "Example relationships", type: :request do
       )
     )
     expect(example.reload.tag_ids).to eq([ third.id ])
+  end
+
+  it "always emits totalCount and a non-null last link for the tags related collection" do
+    # 정본(FastAPI/NestJS)과 맞춰 이 라우트는 page[totals]를 요청받지 않아도 항상
+    # 센다 — meta도 links.last도 조건부가 아니다.
+    example = create(:example)
+    create_list(:example_tag, 3).each { |tag| create(:example_tagging, example: example, example_tag: tag) }
+
+    get related_path(example, "tags"), headers: jsonapi_headers
+
+    expect(response).to have_http_status(:ok)
+    document = parsed_body
+    expect(document.fetch("meta")).to eq("totalCount" => 3)
+    expect(document.fetch("links").keys).to eq(%w[self first prev next last])
+    expect(document.dig("links", "prev")).to be_nil
+    expect(document.dig("links", "next")).to be_nil
+    expect(document.dig("links", "last")).not_to be_nil
+  end
+
+  it "clamps page[size] beyond the maximum to one hundred on the tags related collection" do
+    example = create(:example)
+
+    get "#{related_path(example, 'tags')}?page[size]=200", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:ok)
+    expect(decoded_link_query(parsed_body.dig("links", "self"))).to include("page[size]" => "100")
+  end
+
+  it "walks the tags related collection by following links.next and matches a page[size]=100 baseline" do
+    example = create(:example)
+    create_list(:example_tag, 5).each { |tag| create(:example_tagging, example: example, example_tag: tag) }
+
+    seen = []
+    url = "#{related_path(example, 'tags')}?page[size]=2"
+    while url
+      get url, headers: jsonapi_headers
+      expect(response).to have_http_status(:ok)
+      document = parsed_body
+      seen.concat(document.fetch("data").map { |resource| resource.fetch("id") })
+      url = document.fetch("links").fetch("next")
+    end
+
+    get "#{related_path(example, 'tags')}?page[size]=100", headers: jsonapi_headers
+    expected = parsed_body.fetch("data").map { |resource| resource.fetch("id") }
+    expect(seen).to eq(expected)
+    expect(seen.length).to eq(5)
+    # id 오름차순이라고 명시적으로 고정한다. 태그 id는 무작위 UUID라 삽입 순서와
+    # 무관하므로, 이 assertion 없이는 우연히 일치하는 물리적 정렬만으로도
+    # order(:id) 누락을 눈치채지 못할 수 있다.
+    expect(seen).to eq(seen.sort)
   end
 
   it "rejects a tag linkage with the wrong type" do

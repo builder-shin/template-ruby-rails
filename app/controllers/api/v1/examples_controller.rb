@@ -69,7 +69,11 @@ module Api
       end
 
       def jsonapi_query_mode
-        { "index" => :collection, "show" => :include_only }.fetch(action_name, :none)
+        {
+          "index" => :collection,
+          "show" => :include_only,
+          "related_tags" => :related_collection
+        }.fetch(action_name, :none)
       end
 
       def allowed_relationships

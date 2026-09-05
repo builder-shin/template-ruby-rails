@@ -16,6 +16,7 @@ module Jsonapi
   # 모듈 전체를 "순수 함수만 담는다"고 부를 수는 없다.
   module Pagination
     MAX_PAGE_SIZE = 100
+    DEFAULT_PAGE_SIZE = 20
     MAX_SQL_INTEGER = (2**63) - 1
 
     module_function

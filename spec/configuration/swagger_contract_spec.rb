@@ -78,6 +78,8 @@ RSpec.describe "Swagger contract" do
       .to eq("#/components/schemas/ExampleCategoryResource")
     expect(schemas.dig(:TagCollectionDocument, :properties, :data, :items, "$ref"))
       .to eq("#/components/schemas/ExampleTagResource")
+    expect(schemas.dig(:TagCollectionDocument, :required)).to eq(%w[data links])
+    expect(schemas.dig(:TagCollectionDocument, :properties, :meta, :required)).to eq([ "totalCount" ])
   end
 
   it "uses distinct create, patch, and replace schemas for write semantics" do

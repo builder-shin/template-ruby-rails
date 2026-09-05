@@ -420,12 +420,18 @@ RSpec.configure do |config|
           },
           TagCollectionDocument: {
             type: "object",
-            required: [ "data" ],
+            required: %w[data links],
             properties: {
               data: {
                 type: "array",
                 items: { "$ref" => "#/components/schemas/ExampleTagResource" }
-              }
+              },
+              meta: {
+                type: "object",
+                required: [ "totalCount" ],
+                properties: { totalCount: { type: "integer", minimum: 0 } }
+              },
+              links: { type: "object" }
             }
           },
           ExampleCategoryDocument: {

@@ -60,10 +60,20 @@ module JsonapiQuery
   def validate_jsonapi_action_query!
     return unless respond_to?(:jsonapi_query_mode, true)
 
+    mode = jsonapi_query_mode
     pairs = Jsonapi::RawQuery.decode(request.query_string)
-    return if pairs.empty? || jsonapi_query_mode == :collection
 
-    if jsonapi_query_mode == :include_only
+    # related_collection은 pairs가 비어도(기본 페이지) 돌려야 한다 — render_related_resource가
+    # 쓸 page[number]/page[size] 기본값을 ivar에 남겨야 하기 때문이다. 다른 모드는
+    # 빈 쿼리에서 할 일이 없어 여기서 바로 끝난다.
+    if mode == :related_collection
+      validate_related_collection_query!(pairs)
+      return
+    end
+
+    return if pairs.empty? || mode == :collection
+
+    if mode == :include_only
       validate_include_only_query!(pairs)
       return
     end
@@ -85,15 +95,8 @@ module JsonapiQuery
   def validate_include_only_query!(pairs)
     seen_include = false
     pairs.each do |parameter, value|
-      family = parameter.split("[", 2).first
       unless parameter == "include" && !seen_include
-        code = {
-          "filter" => "INVALID_FILTER",
-          "sort" => "INVALID_SORT",
-          "include" => "INVALID_INCLUDE",
-          "page" => "INVALID_PAGE"
-        }.fetch(family, "INVALID_QUERY_PARAMETER")
-        raise JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
+        raise_jsonapi_family_error!(parameter)
       end
 
       seen_include = true
@@ -104,5 +107,63 @@ module JsonapiQuery
         raise JsonApiError.new(status: 400, code: "INVALID_INCLUDE", source: { parameter: parameter })
       end
     end
+  end
+
+  # 정본(FastAPI `parse_page_query` / 스펙 8.2)과 같은 계약: to-many related-resource
+  # URL은 page[number]·page[size]만 받는다. page[totals]도 여기서는 거부한다 —
+  # 이 라우트는 총 개수를 항상 내므로 켜고 끌 것이 없다.
+  #
+  # before_action에서 한 번만 파싱해 ivar에 남긴다. render_related_resource가 같은
+  # 쿼리 문자열을 다시 파싱하지 않게 하기 위해서다.
+  def validate_related_collection_query!(pairs)
+    page_number = 1
+    page_size = Jsonapi::Pagination::DEFAULT_PAGE_SIZE
+    seen_page_parameters = []
+
+    pairs.each do |parameter, value|
+      raise_jsonapi_family_error!(parameter) unless %w[page[number] page[size]].include?(parameter)
+
+      if seen_page_parameters.include?(parameter)
+        raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
+      end
+      seen_page_parameters << parameter
+
+      parsed_value = parse_related_collection_page_integer!(value, parameter)
+      if parameter == "page[number]"
+        page_number = parsed_value
+      else
+        page_size = [ parsed_value, Jsonapi::Pagination::MAX_PAGE_SIZE ].min
+      end
+    end
+
+    if (page_number - 1) * page_size > Jsonapi::Pagination::MAX_SQL_INTEGER
+      raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: "page[number]" })
+    end
+
+    @related_collection_page_number = page_number
+    @related_collection_page_size = page_size
+  end
+
+  def parse_related_collection_page_integer!(raw_value, parameter)
+    max_digits = Jsonapi::Pagination::MAX_SQL_INTEGER.to_s.length
+    unless raw_value.length <= max_digits && /\A[0-9]+\z/.match?(raw_value)
+      raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
+    end
+
+    value = Integer(raw_value, 10)
+    return value if value.between?(1, Jsonapi::Pagination::MAX_SQL_INTEGER)
+
+    raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
+  rescue ArgumentError
+    raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
+  end
+
+  # `validate_include_only_query!`와 `validate_related_collection_query!`가 같이 쓰는
+  # 파라미터 패밀리 → 에러 코드 매핑. `Jsonapi::RawQuery`가 형태 충돌 판정에 쓰는 것과
+  # 같은 매핑이라 여기서 새로 정의하지 않고 그대로 재사용한다.
+  def raise_jsonapi_family_error!(parameter)
+    family = parameter.split("[", 2).first
+    code = Jsonapi::RawQuery::ERROR_CODE_BY_FAMILY.fetch(family, "INVALID_QUERY_PARAMETER")
+    raise JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
   end
 end
