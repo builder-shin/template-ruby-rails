@@ -3,17 +3,15 @@
 require "rails_helper"
 
 RSpec.describe "Auth configuration" do
-  # auth_service_config_spec.rb는 INITIALIZER/ENVIRONMENT_KEYS를 이 describe 블록
-  # 안에서 상수로 정의한다. 그런데 `RSpec.describe do ... end`는 class_exec로
-  # 실행돼도 상수 대입만큼은 self가 아니라 블록이 "쓰인" 렉시컬 스코프(이 파일의
-  # 최상단)를 따른다 — 즉 두 파일 다 같은 top-level Object::INITIALIZER,
-  # Object::ENVIRONMENT_KEYS에 겹쳐 쓴다. 실제로 겪은 문제: 두 spec 파일이 같은
-  # 프로세스에서 함께 로드되면(전체 스위트 실행 시 항상 그렇다) 나중에 로드되는
-  # 파일의 값으로 덮어써져서, 이 파일의 around 훅이 3개짜리(AUTH_SERVICE_URL류)
-  # 키 목록으로 ENV를 정리하며 내 7개 JWT_* 키는 전혀 건드리지 못했다 — 그 결과
-  # 한 예제가 설정한 ENV 값이 다음 예제로 새어 들어갔다. def로 정의하는 인스턴스
-  # 메서드는 class_exec의 self를 따라 이 describe 블록에만 스코프되므로 같은
-  # 문제가 없다.
+  # 설정을 상수가 아니라 인스턴스 메서드로 두는 이유가 있다. `RSpec.describe do
+  # ... end`는 class_exec로 실행돼도 상수 대입만큼은 self가 아니라 블록이 "쓰인"
+  # 렉시컬 스코프(파일 최상단)를 따른다 — 즉 describe 블록 안에서 정의한 상수는
+  # 사실 top-level Object의 상수라서 같은 이름을 쓰는 다른 spec 파일과 겹쳐 쓴다.
+  # 실제로 겪은 문제였다: C2가 지운 다른 설정 spec이 같은 이름의 상수를 정의했고,
+  # 전체 스위트를 돌릴 때 나중에 로드되는 파일의 값이 이겨서 이 파일의 around
+  # 훅이 엉뚱한 키 목록으로 ENV를 정리했다 — 한 예제가 설정한 ENV 값이 다음
+  # 예제로 샜다. def로 정의하는 인스턴스 메서드는 class_exec의 self를 따라 이
+  # describe 블록에만 스코프되므로 같은 문제가 없다.
   def initializer_path
     Rails.root.join("config/initializers/auth.rb")
   end
@@ -41,9 +39,8 @@ RSpec.describe "Auth configuration" do
     Rails.application.config.x.auth = original_config
   end
 
-  # auth_service_config_spec.rb의 load_auth_initializer와 같은 모양이다. 다만 이
-  # 설정은 Rails.env에 따라 분기하지 않으므로(JWT_SECRET_KEY는 모든 환경에서 필수)
-  # environment 인자가 없다 — 매 예제가 알려진 키를 전부 지운 뒤 필요한 것만 넣는다.
+  # 이 설정은 Rails.env에 따라 분기하지 않는다(JWT_SECRET_KEY는 모든 환경에서
+  # 필수다) — 매 예제가 알려진 키를 전부 지운 뒤 필요한 것만 넣는다.
   def load_auth_initializer(overrides = {})
     environment_keys.each { |key| ENV.delete(key) }
     overrides.each { |key, value| ENV[key] = value }

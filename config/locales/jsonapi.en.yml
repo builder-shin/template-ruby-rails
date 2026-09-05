@@ -55,12 +55,6 @@ en:
       AUTHENTICATION_REQUIRED:
         title: "Authentication required"
         detail: "You must be signed in to access this resource."
-      FORBIDDEN:
-        title: "Forbidden"
-        detail: "You are not allowed to access this resource."
-      AUTH_SERVICE_UNAVAILABLE:
-        title: "Authentication service unavailable"
-        detail: "The authentication service is temporarily unavailable."
       INVALID_TOKEN:
         title: "Invalid token"
         detail: "The authentication token is invalid."

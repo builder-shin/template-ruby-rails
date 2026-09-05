@@ -6,7 +6,6 @@ RSpec.describe "Example authentication boundary", type: :request do
   let(:collection_path) { "/api/v1/examples" }
 
   before do
-    AuthServiceClient.reset_circuit!
     Rails.cache.clear
   end
 
@@ -52,7 +51,6 @@ RSpec.describe "Example authentication boundary", type: :request do
     tag = create(:example_tag)
     example = create(:example, category: category)
     create(:example_tagging, example: example, example_tag: tag)
-    expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
 
     [
       [ collection_path, :ok ],
@@ -68,18 +66,14 @@ RSpec.describe "Example authentication boundary", type: :request do
     end
   end
 
-  it "무효한 인증 정보가 있어도 6개 공개 읽기에서 인증 조회를 생략한다" do
-    # 낡은 session_web 쿠키와 엉터리 Bearer 토큰을 함께 실어 본다 — 읽기는 둘 중
-    # 어느 메커니즘도 거치지 않는다는 것을 증명한다(ExamplesController가 모든
-    # 액션에서 skip_before_action :set_current_user이고, authenticate_active_user!는
-    # PROTECTED_WRITE_ACTIONS에만 붙는다).
+  it "무효한 Bearer 토큰이 실려 있어도 6개 공개 읽기는 200을 낸다" do
+    # 엉터리 토큰이 프로브다. 읽기가 인증을 거친다면 이 토큰은 decode에서 실패해
+    # 401 INVALID_TOKEN이 나온다 — 200이 나온다는 것이 곧 그 경로를 지나지 않았다는
+    # 증거다(authenticate_active_user!는 PROTECTED_WRITE_ACTIONS에만 붙는다).
     category = create(:example_category)
     tag = create(:example_tag)
     example = create(:example, category: category)
     create(:example_tagging, example: example, example_tag: tag)
-    auth_client = instance_double(AuthServiceClient)
-    allow(AuthServiceClient).to receive(:new).and_return(auth_client)
-    allow(auth_client).to receive(:verify_session).and_return(nil)
     paths = [
       collection_path,
       resource_path(example),
@@ -88,14 +82,13 @@ RSpec.describe "Example authentication boundary", type: :request do
       relationship_path(example, "tags"),
       "#{resource_path(example)}/tags"
     ]
-    headers = jsonapi_headers.merge(auth_cookie_headers("stale-session")).merge("Authorization" => "Bearer garbage-token")
+    headers = jsonapi_headers.merge("Authorization" => "Bearer garbage-token")
 
     paths.each do |path|
       get path, headers: headers
 
       expect(response).to have_http_status(:ok)
     end
-    expect(auth_client).not_to have_received(:verify_session)
   end
 
   it "Authorization 헤더가 없으면 정확히 8개 쓰기 액션을 401 AUTHENTICATION_REQUIRED로 거부한다" do
@@ -115,28 +108,12 @@ RSpec.describe "Example authentication boundary", type: :request do
       [ :patch, relationship_path(example, "tags"), tag_linkage ],
       [ :delete, relationship_path(example, "tags"), tag_linkage ]
     ]
-    expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
 
     writes.each do |method, path, body|
       perform_jsonapi(method, path, body: body)
 
       expect_auth_error(:unauthorized, "AUTHENTICATION_REQUIRED", source: { "header" => "Authorization" })
     end
-  end
-
-  it "세션 쿠키만으로는 더 이상 쓰기를 인증하지 않는다" do
-    # 계약이 뒤집힌 자리: 예전에는 session_web 쿠키만이 쓰기를 인증했고
-    # Authorization 헤더는 무시됐다. 이제는 반대다 — 이 테스트가 옛 메커니즘이
-    # 조용히 되살아나지 않는다는 것을 고정한다.
-    perform_jsonapi(
-      :post,
-      collection_path,
-      body: example_document,
-      headers: jsonapi_headers.merge(auth_cookie_headers("looks-legit"))
-    )
-
-    expect_auth_error(:unauthorized, "AUTHENTICATION_REQUIRED", source: { "header" => "Authorization" })
-    expect(Example.count).to eq(0)
   end
 
   it "Bearer 스킴이 아니거나 형식이 깨진 Authorization 헤더는 401 INVALID_TOKEN을 반환한다" do
@@ -258,7 +235,6 @@ RSpec.describe "Example authentication boundary", type: :request do
       [ :patch, relationship_path(example, "tags"), tag_linkage ],
       [ :delete, relationship_path(example, "tags"), tag_linkage ]
     ]
-    expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
 
     writes.each do |method, path, body|
       aggregate_failures("#{method} #{path} Accept") do
@@ -291,8 +267,6 @@ RSpec.describe "Example authentication boundary", type: :request do
   end
 
   it "정상 media의 unsupported query를 인증보다 먼저 거부한다" do
-    expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
-
     perform_jsonapi(
       :post,
       "#{collection_path}?fields[examples]=title",
@@ -304,8 +278,6 @@ RSpec.describe "Example authentication boundary", type: :request do
   end
 
   it "anonymous DELETE는 존재하지 않는 UUID도 조회 전에 401로 거부한다" do
-    expect_any_instance_of(AuthServiceClient).not_to receive(:verify_session)
-
     perform_jsonapi(:delete, resource_path(SecureRandom.uuid))
 
     expect_auth_error(:unauthorized, "AUTHENTICATION_REQUIRED")

@@ -20,12 +20,10 @@ module Api
       ].freeze
       private_constant :PROTECTED_WRITE_ACTIONS
 
-      skip_before_action :set_current_user
       # 정본에서 확인한 사실: 쓰기 라우트는 get_current_active_user를 쓴다 —
-      # authenticate_active_user!가 그 갈래다(JsonapiAuthentication 참고). 예전에는
-      # 여기서 set_current_user(AuthServiceClient 쿠키 세션)를 부른 뒤
-      # require_active_user!로 활성만 검사했다; 이제 Bearer access token 자체를
-      # 검증하고 User를 조회하는 것까지 authenticate_active_user! 하나가 한다.
+      # authenticate_active_user!가 그 갈래다(JsonapiAuthentication 참고). Bearer
+      # access token을 검증하고 User를 조회하고 활성 여부를 보는 것까지 그 하나가
+      # 한다. 읽기 액션은 이 목록에 없으므로 어떤 인증도 거치지 않는다.
       before_action :authenticate_active_user!, only: PROTECTED_WRITE_ACTIONS
       skip_before_action :_set_model, only: %i[update destroy]
 

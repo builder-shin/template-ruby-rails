@@ -25,19 +25,12 @@ Rails.application.configure do
       # (ApplicationController.instance_method(:append_info_to_payload).owner는
       # ActiveRecord::Railties::ControllerRuntime이지 lograge가 아니다) —
       # 그래서 이 블록은 한 번도 실행된 적이 없고, log/test.log의 실제 요청 줄에도
-      # user_id·workspace_id·remote_ip·request_id가 전혀 없다. &.workspace_id를
-      # try(:workspace_id)로 되돌려도(즉 이 자리를 원래대로 무너뜨려도) 어떤 테스트도
-      # 잡지 못한다 — 죽은 코드를 고정할 테스트는 없다.
+      # user_id·remote_ip·request_id가 전혀 없다. 이 자리를 무너뜨려도 어떤
+      # 테스트도 잡지 못한다 — 죽은 코드를 고정할 테스트는 없다.
       #
-      # 그래도 try를 쓰는 이유는 방어적 정합성이다: Current.user가 이제
-      # AuthUser(workspace_id 있음)뿐 아니라 User(없음)도 될 수 있는데, &.는 nil
-      # 수신자만 걸러내지 nil이 아닌 User에 없는 메서드 호출까지 막아주지는 않는다.
-      # 누군가 나중에 base_controller_class를 "ApplicationController"로 설정해
-      # (이 템플릿이 지금까지 한 번도 user_id/remote_ip/request_id를 프로덕션 로그에
-      # 남긴 적이 없다는 별도의 기존 관측성 결함을 고치면) 이 블록이 실제로 돌기
-      # 시작하는 순간, try는 죽은 방어가 아니라 진짜로 응답을 지키는 코드가 된다 —
-      # 그때쯤이면 Task 6이 workspace_id/AuthUser 자체를 지웠을 가능성이 높지만.
-      workspace_id: Current.user.try(:workspace_id),
+      # workspace_id는 여기서 빠졌다. 그것은 외부 인증 서비스가 돌려주던 사용자
+      # 표현에만 있던 속성이고, C2가 그 모델과 호출 경로를 통째로 지웠다.
+      # Current.user는 이제 항상 User이며 User에는 그런 개념이 없다.
       request_id: controller.request.request_id
     }
   end

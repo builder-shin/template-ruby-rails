@@ -20,8 +20,8 @@ module Api
     # — 그래야 오류 모양이 CRUD 라우트와 어긋나지 않는다(TYPE_MISMATCH·
     # INVALID_JSONAPI_DOCUMENT의 상태 코드와 pointer 조립 방식이 CrudActions와
     # 동일). ApplicationController를 직접 물려받으므로(UsersController와 같은
-    # 이유 — ApiController가 주는 CrudActions·레거시 set_current_user 흐름이
-    # 전부 불필요하다) JsonapiNegotiation(406/415/최상위 malformed JSON 400)과
+    # 이유 — ApiController가 주는 CrudActions가 이 컨트롤러에는 전부 불필요하다)
+    # JsonapiNegotiation(406/415/최상위 malformed JSON 400)과
     # JsonapiErrors(예외 → JSON:API 오류 렌더링)는 자동으로 물려받는다.
     class AuthController < ApplicationController
       REGISTER_ATTRIBUTES = %w[email password].freeze

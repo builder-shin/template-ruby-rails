@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-# JWT_SECRET_KEY는 애플리케이션 코드 어디에도 기본값을 두지 않는다. AUTH_SERVICE_URL과
-# 달리 development/test용 fallback도 없다 — fallback을 두면 그 문자열이 사실상 소스에
-# 박힌 서명 키가 되어, 그 값으로 서명된 토큰을 누구나 위조할 수 있게 된다. 없으면
-# 모든 환경에서 그대로 부팅에 실패해야 한다.
+# JWT_SECRET_KEY는 애플리케이션 코드 어디에도 기본값을 두지 않는다. development/test용
+# fallback조차 없다 — fallback을 두면 그 문자열이 사실상 소스에 박힌 서명 키가 되어,
+# 그 값으로 서명된 토큰을 누구나 위조할 수 있게 된다. 없으면 모든 환경에서 그대로
+# 부팅에 실패해야 한다.
 jwt_secret_key = ENV["JWT_SECRET_KEY"].presence
 raise "JWT_SECRET_KEY must be set" if jwt_secret_key.nil?
 raise "JWT_SECRET_KEY must be at least 32 bytes (UTF-8)" if jwt_secret_key.bytesize < 32

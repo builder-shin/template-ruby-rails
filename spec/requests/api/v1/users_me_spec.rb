@@ -98,10 +98,4 @@ RSpec.describe "GET /api/v1/users/me", type: :request do
 
     expect_auth_error(:unauthorized, "INVALID_TOKEN", source: { "header" => "Authorization" })
   end
-
-  it "does not authenticate via the legacy session_web cookie" do
-    get path, headers: jsonapi_headers.merge(auth_cookie_headers("looks-legit"))
-
-    expect_auth_error(:unauthorized, "AUTHENTICATION_REQUIRED", source: { "header" => "Authorization" })
-  end
 end

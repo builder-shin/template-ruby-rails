@@ -188,8 +188,8 @@ RSpec.describe "Example atomic PUT upsert", type: :request do
       # 파일 최상위 before(9번째 줄)의 mock_bearer_user가 먼저 실행되고, 그 뒤 이
       # truncation이 방금 만든 User 행까지 지운다 — before 훅은 등록 순서(바깥
       # → 안쪽)대로 도는데 truncation이 안쪽에 있어서다. 두 스레드가 여기서
-      # 진짜 DB 조회로 인증하므로(예전 AuthServiceClient 스텁과 달리 DB를
-      # 본다) truncation 뒤에 다시 만들어야 한다.
+      # 진짜 DB 조회로 인증하므로(Bearer 토큰의 sub로 User 행을 찾는다)
+      # truncation 뒤에 다시 만들어야 한다.
       mock_bearer_user
     end
 

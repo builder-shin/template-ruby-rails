@@ -25,7 +25,6 @@ docker compose up --build
 
 - `db`: PostgreSQL
 - `redis`: Sidekiq broker
-- `auth-stub`: 개발 인증 응답을 제공하는 WireMock
 - `migrate`: `bin/rails db:prepare` 실행 후 종료
 - `api`: `http://localhost:4000`
 - `worker`: Sidekiq worker
@@ -42,12 +41,6 @@ curl -fsS http://localhost:4000/health/ready
 docker compose down -v --remove-orphans
 ```
 
-### 개발용 Auth stub
-
-Auth stub은 development 전용입니다. `session_web=dev-session` 쿠키에만 고정된 개발
-사용자를 반환합니다. production에서는 이 stub을 사용하지 않으며 실제 외부 인증 서비스의
-`AUTH_SERVICE_URL`을 반드시 설정해야 합니다.
-
 ## 로컬 Ruby로 실행
 
 Ruby 3.4.8, PostgreSQL, Redis가 필요합니다.
@@ -59,8 +52,9 @@ bin/rails db:prepare
 bin/rails server -p 4000
 ```
 
-`.env`의 `DATABASE_HOST`, `DEV_DATABASE_*`, `REDIS_URL`, `AUTH_SERVICE_URL`을 로컬
-환경에 맞게 설정합니다. API 문서는 `http://localhost:4000/api-docs`에서 확인할 수 있습니다.
+`.env`의 `DATABASE_HOST`, `DEV_DATABASE_*`, `REDIS_URL`, `JWT_SECRET_KEY`를 로컬
+환경에 맞게 설정합니다. `JWT_SECRET_KEY`는 코드에 기본값이 없어 비어 있으면 부팅이
+실패합니다. API 문서는 `http://localhost:4000/api-docs`에서 확인할 수 있습니다.
 
 ## JSON:API 사용
 
@@ -228,7 +222,6 @@ app/controllers/api/v1/auth_controller.rb       가입·로그인·refresh·로�
 app/controllers/concerns/crud_actions.rb        공통 CRUD 및 관계 동작
 app/controllers/concerns/jsonapi_authentication.rb  Bearer 액세스 토큰 가드
 app/lib/auth/                                    비밀번호 해시, JWT, refresh 세션 원시 함수
-app/services/auth_service_client.rb             레거시 외부 Auth 연동(단계적 제거 예정)
 app/jobs/                                        Sidekiq 작업
 config/routes.rb                                 API와 health 경로
 docker-compose.yml                               개발 스택
