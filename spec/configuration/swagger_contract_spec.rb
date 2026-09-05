@@ -82,6 +82,41 @@ RSpec.describe "Swagger contract" do
     expect(schemas.dig(:TagCollectionDocument, :properties, :meta, :required)).to eq([ "totalCount" ])
   end
 
+  # 위 "public read path"용 response_schema_ref 관례를 auth 경로까지 확장하지
+  # 않는다 — 그 테스트는 이름 그대로 "공개 읽기 경로"의 계약이고, auth 네 경로는
+  # 전부 무인증 **쓰기**(POST) 액션이라 범주 자체가 다르다. 대신 write 스키마
+  # 관례를 고정하는 아래 테스트("uses distinct create, patch, and replace...")와
+  # 같은 층위에서 auth의 요청 스키마 참조와 authTokens 응답 모양을 여기서
+  # 고정한다.
+  it "uses dedicated request schemas for each auth action and omits links from authTokens" do
+    expect(request_schema_ref("/api/v1/auth/register", :post))
+      .to eq("#/components/schemas/AuthRegisterDocument")
+    expect(request_schema_ref("/api/v1/auth/login", :post))
+      .to eq("#/components/schemas/AuthLoginDocument")
+    expect(request_schema_ref("/api/v1/auth/refresh", :post))
+      .to eq("#/components/schemas/RefreshTokenDocument")
+    expect(request_schema_ref("/api/v1/auth/logout", :post))
+      .to eq("#/components/schemas/RefreshTokenDocument")
+
+    expect(response_schema_ref("/api/v1/auth/register", :post, "201"))
+      .to eq("#/components/schemas/UserDocument")
+    expect(response_schema_ref("/api/v1/auth/login", :post, "200"))
+      .to eq("#/components/schemas/AuthTokenDocument")
+    expect(response_schema_ref("/api/v1/auth/refresh", :post, "200"))
+      .to eq("#/components/schemas/AuthTokenDocument")
+
+    # authTokens는 self 링크가 없으므로(app/serializers/auth_token_serializer.rb),
+    # UserResource/ExampleResource와 달리 links를 required로 요구하지 않는다.
+    auth_token_resource_object = schemas.dig(:AuthTokenResource, :allOf, 1)
+    expect(auth_token_resource_object[:required]).to eq([ "attributes" ])
+    expect(auth_token_resource_object.dig(:properties)).not_to have_key(:links)
+
+    expect(openapi.dig(:paths, "/api/v1/auth/register", :post, :security)).to be_nil
+    expect(openapi.dig(:paths, "/api/v1/auth/login", :post, :security)).to be_nil
+    expect(openapi.dig(:paths, "/api/v1/auth/refresh", :post, :security)).to be_nil
+    expect(openapi.dig(:paths, "/api/v1/auth/logout", :post, :security)).to be_nil
+  end
+
   it "uses distinct create, patch, and replace schemas for write semantics" do
     expect(request_schema_ref("/api/v1/examples", :post))
       .to eq("#/components/schemas/ExampleCreateDocument")

@@ -28,6 +28,9 @@ RSpec.describe "JSON:API errors", type: :request do
     INVALID_TOKEN
     TOKEN_EXPIRED
     USER_INACTIVE
+    EMAIL_ALREADY_REGISTERED
+    INVALID_CREDENTIALS
+    TOKEN_REVOKED
   ].freeze
 
   def expect_error(status:, code:)

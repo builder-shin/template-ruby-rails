@@ -25,6 +25,9 @@ class JsonApiError < StandardError
     INVALID_TOKEN
     TOKEN_EXPIRED
     USER_INACTIVE
+    EMAIL_ALREADY_REGISTERED
+    INVALID_CREDENTIALS
+    TOKEN_REVOKED
   ].freeze
 
   attr_reader :status, :code, :source, :context

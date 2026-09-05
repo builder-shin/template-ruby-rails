@@ -7,6 +7,16 @@ Rails.application.routes.draw do
 
   namespace :api do
     namespace :v1 do
+      # 가입 · 로그인 · refresh 회전 · 로그아웃. 자원 하나의 CRUD가 아니라 서로
+      # 다른 네 동작이라 `resources`가 아니라 각자 경로를 명시한다
+      # (AuthController가 CrudActions를 쓰지 않는 이유는 그 컨트롤러 코멘트 참고).
+      # 전부 무인증 라우트다 — Bearer 토큰을 발급/회전/폐기하는 자리이지, Bearer로
+      # 지키는 자리가 아니다.
+      post "auth/register", to: "auth#register"
+      post "auth/login", to: "auth#login"
+      post "auth/refresh", to: "auth#refresh"
+      post "auth/logout", to: "auth#logout"
+
       resources :examples, only: %i[index show create destroy] do
         member do
           get "relationships/category", action: :category_relationship

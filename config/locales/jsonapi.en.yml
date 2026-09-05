@@ -70,3 +70,12 @@ en:
       USER_INACTIVE:
         title: "User inactive"
         detail: "Your account is inactive."
+      EMAIL_ALREADY_REGISTERED:
+        title: "Email already registered"
+        detail: "This email address is already in use."
+      INVALID_CREDENTIALS:
+        title: "Invalid credentials"
+        detail: "The email or password is incorrect."
+      TOKEN_REVOKED:
+        title: "Token revoked"
+        detail: "This authentication token has already been revoked."

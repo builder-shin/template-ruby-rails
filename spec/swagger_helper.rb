@@ -145,6 +145,23 @@ RSpec.configure do |config|
         },
         "/api/v1/users/me" => {
           get: operation.call("내 프로필 조회", "UserDocument", protected: true)
+        },
+        "/api/v1/auth/register" => {
+          post: operation.call(
+            "가입",
+            "UserDocument",
+            status: "201",
+            request_schema: "AuthRegisterDocument"
+          )
+        },
+        "/api/v1/auth/login" => {
+          post: operation.call("로그인", "AuthTokenDocument", request_schema: "AuthLoginDocument")
+        },
+        "/api/v1/auth/refresh" => {
+          post: operation.call("Refresh token 회전", "AuthTokenDocument", request_schema: "RefreshTokenDocument")
+        },
+        "/api/v1/auth/logout" => {
+          post: operation.call("로그아웃", status: "204", request_schema: "RefreshTokenDocument")
         }
       },
       components: {
@@ -181,6 +198,97 @@ RSpec.configure do |config|
             required: [ "data" ],
             properties: {
               data: { "$ref" => "#/components/schemas/UserResource" }
+            }
+          },
+          AuthCredentialsAttributes: {
+            type: "object",
+            required: %w[email password],
+            properties: {
+              email: { type: "string", format: "email", maxLength: 254 },
+              password: { type: "string", minLength: 12, maxLength: 128 }
+            }
+          },
+          AuthRegisterDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                type: "object",
+                required: %w[type attributes],
+                properties: {
+                  type: { type: "string", enum: [ "users" ] },
+                  attributes: { "$ref" => "#/components/schemas/AuthCredentialsAttributes" }
+                }
+              }
+            }
+          },
+          AuthLoginDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                type: "object",
+                required: %w[type attributes],
+                properties: {
+                  type: { type: "string", enum: [ "authCredentials" ] },
+                  attributes: { "$ref" => "#/components/schemas/AuthCredentialsAttributes" }
+                }
+              }
+            }
+          },
+          RefreshTokenAttributes: {
+            type: "object",
+            required: [ "refreshToken" ],
+            properties: {
+              refreshToken: { type: "string" }
+            }
+          },
+          RefreshTokenDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: {
+                type: "object",
+                required: %w[type attributes],
+                properties: {
+                  type: { type: "string", enum: [ "refreshTokens" ] },
+                  attributes: { "$ref" => "#/components/schemas/RefreshTokenAttributes" }
+                }
+              }
+            }
+          },
+          AuthTokenIdentifier: identifier_schema.call("authTokens"),
+          AuthTokenAttributes: {
+            type: "object",
+            required: %w[accessToken refreshToken tokenType expiresIn refreshExpiresIn],
+            properties: {
+              accessToken: { type: "string" },
+              refreshToken: { type: "string" },
+              tokenType: { type: "string", enum: [ "Bearer" ] },
+              expiresIn: { type: "integer", minimum: 0 },
+              refreshExpiresIn: { type: "integer", minimum: 0 }
+            }
+          },
+          AuthTokenResource: {
+            # UserResource/ExampleResource와 달리 links를 요구하지 않는다 —
+            # AuthTokenSerializer는 self 링크를 내지 않는다(resource_path 없음,
+            # app/serializers/auth_token_serializer.rb 참고).
+            allOf: [
+              { "$ref" => "#/components/schemas/AuthTokenIdentifier" },
+              {
+                type: "object",
+                required: [ "attributes" ],
+                properties: {
+                  attributes: { "$ref" => "#/components/schemas/AuthTokenAttributes" }
+                }
+              }
+            ]
+          },
+          AuthTokenDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: { "$ref" => "#/components/schemas/AuthTokenResource" }
             }
           },
           ExampleIdentifier: identifier_schema.call("examples"),

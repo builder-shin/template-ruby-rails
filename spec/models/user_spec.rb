@@ -13,12 +13,19 @@ RSpec.describe User, type: :model do
       expect(user.errors[:email]).to be_present
     end
 
-    it "rejects a duplicate email" do
+    # Task 5: 모델은 더 이상 uniqueness를 사전 조회로 검증하지 않는다(app/models/user.rb의
+    # 주석 참고) — 그래서 `valid?`는 중복 이메일이어도 true를 반환한다. 유니크는
+    # DB 유니크 인덱스(index_users_on_email)가 강제하고, AuthController#register가
+    # 그 위반(ActiveRecord::RecordNotUnique)을 409 EMAIL_ALREADY_REGISTERED로
+    # 옮긴다(spec/requests/api/v1/auth_spec.rb). 여기서는 그 DB 계약만 고정한다:
+    # 모델 검증을 우회해도(validate: false) 유니크 인덱스 자체는 살아 있다.
+    it "does not validate uniqueness at the model layer -- the database unique index is the only enforcement" do
       create(:user, email: "duplicate@example.com")
       user.email = "duplicate@example.com"
 
-      expect(user).not_to be_valid
-      expect(user.errors[:email]).to be_present
+      expect(user).to be_valid
+
+      expect { user.save!(validate: false) }.to raise_error(ActiveRecord::RecordNotUnique)
     end
 
     it "rejects a blank password_hash" do

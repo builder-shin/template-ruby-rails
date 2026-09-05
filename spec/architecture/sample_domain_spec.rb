@@ -64,7 +64,17 @@ RSpec.describe "Sample domain architecture" do
       "SimpleCov 80%",
       "bundle exec rspec",
       "bundle exec rubocop",
-      "bundle exec brakeman --no-pager -q"
+      "bundle exec brakeman --no-pager -q",
+      # Task 5: 쓰기 인증이 session_web 쿠키에서 로컬 JWT Bearer로 바뀌었다 —
+      # 위 "session_web=dev-session" 문자열은 여전히 참이지만(auth-stub 자체는
+      # Task 6 전까지 아직 존재), 그것이 더 이상 쓰기 인증 방법이라고 읽혀서는
+      # 안 된다. 실제 흐름(가입 → 로그인 → Bearer)이 README에 있다는 것을 여기서
+      # 같이 고정한다.
+      "/api/v1/auth/register",
+      "/api/v1/auth/login",
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/logout",
+      "Authorization: Bearer"
     )
     expect(readme).to match(/Auth stub.*development.*production.*AUTH_SERVICE_URL/im)
   end
