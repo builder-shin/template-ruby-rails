@@ -28,10 +28,15 @@ RSpec.describe "Sidekiq cron schedule contract" do
     YAML.safe_load_file(Rails.root.join("config", "sidekiq_cron.yml"), permitted_classes: [ Date, Time ]) || {}
   end
 
-  it "schedules the expired refresh session purge" do
+  it "schedules the expired refresh session purge every hour on the hour" do
     expect(schedule).to have_key("purge_expired_refresh_sessions")
-    expect(schedule.fetch("purge_expired_refresh_sessions").fetch("class"))
-      .to eq("PurgeExpiredRefreshSessionsJob")
+    entry = schedule.fetch("purge_expired_refresh_sessions")
+    expect(entry.fetch("class")).to eq("PurgeExpiredRefreshSessionsJob")
+    # 주기를 여기서 고정한다. 이 값이 잡 헤더 주석·YAML 주석·README·정본 README
+    # 넷에 문장으로 적혀 있는데, 그 넷 중 어느 것도 검사받지 않는다 — 실제로 잡
+    # 헤더 주석만 "매일 한 번"으로 24배 어긋난 채 남아 있었다. 주기를 바꾸려는
+    # 사람이 그 문장들을 함께 고치도록 여기서 먼저 실패하게 둔다.
+    expect(entry.fetch("cron")).to eq("0 * * * * UTC")
   end
 
   it "resolves every class: to a constant that sidekiq-cron can actually enqueue" do
