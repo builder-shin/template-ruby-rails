@@ -67,7 +67,7 @@ def apply_sort(scope)
 4. categories · tags 라우트   단계 1에 의존
 ```
 
-`2`와 `3`은 건드리는 파일이 겹치지 않아(`app/jsonapi/` vs `app/auth/`) 서로 독립이다. `4`는 `1` 이후 언제든 가능하다.
+`2`와 `3`은 건드리는 파일이 겹치지 않아(`app/lib/jsonapi/` vs `app/auth/`) 서로 독립이다. `4`는 `1` 이후 언제든 가능하다.
 
 ## 4. 단계 1 — 쿼리 엔진 탈-Example화
 
@@ -150,13 +150,13 @@ page[number]와 함께 오면 INVALID_PAGE
 
 ```text
 app/controllers/concerns/jsonapi_query.rb   concern 진입점과 액션별 검증 (~130줄)
-app/jsonapi/raw_query.rb                    RawQuery + ShapeTree
-app/jsonapi/query_parser.rb                 파싱과 scope 적용
-app/jsonapi/pagination.rb                   offset · probe · 링크 조립
-app/jsonapi/cursor.rb                       커서 인코딩·디코딩, keyset 술어
+app/lib/jsonapi/raw_query.rb                RawQuery + ShapeTree
+app/lib/jsonapi/query_parser.rb             파싱과 scope 적용
+app/lib/jsonapi/pagination.rb               offset · probe · 링크 조립
+app/lib/jsonapi/cursor.rb                   커서 인코딩·디코딩, keyset 술어
 ```
 
-`app/` 아래이므로 Rails autoload가 그대로 잡는다.
+Rails는 `app/*` **각각을** Zeitwerk 루트로 등록한다(`paths.add "app", glob: "{*,*/concerns}"`). 따라서 `app/jsonapi/raw_query.rb`는 최상위 `RawQuery`를 정의해야 하고, `Jsonapi::RawQuery`를 넣으면 `NameError`가 난다 — 저장소 안의 증거는 `app/errors/json_api_error.rb`가 최상위 `JsonApiError`를 정의한다는 것이다. `app/lib`는 그 자체가 루트이므로 `app/lib/jsonapi/raw_query.rb` → `Jsonapi::RawQuery`가 설정 한 줄 없이 성립한다. 덤으로 SimpleCov의 `track_files "app/**/*.rb"`에도 걸린다 — 최상위 `lib/`에 두었다면 커버리지 추적에서 조용히 빠졌을 자리다.
 
 ## 6. 단계 3 — 인증 이식
 

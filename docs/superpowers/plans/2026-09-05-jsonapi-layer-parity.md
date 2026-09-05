@@ -12,7 +12,7 @@
 
 ## 이 계획의 범위 — 스펙을 둘로 나눈다
 
-스펙은 네 단계를 담고 있고 그중 **단계 3(인증 이식)은 독립된 하위 시스템**이다. 스펙 §3이 스스로 그렇게 말한다 — *"2와 3은 건드리는 파일이 겹치지 않아(`app/jsonapi/` vs `app/auth/`) 서로 독립이다."*
+스펙은 네 단계를 담고 있고 그중 **단계 3(인증 이식)은 독립된 하위 시스템**이다. 스펙 §3이 스스로 그렇게 말한다 — *"2와 3은 건드리는 파일이 겹치지 않아(`app/lib/jsonapi/` vs `app/auth/`) 서로 독립이다."*
 
 단계 3은 새 파일 12개, 삭제 6개, JWT·argon2·refresh 회전·재사용 감지·Sidekiq job을 포함한다. 그 하나가 다른 세 단계를 합친 것보다 크다.
 
@@ -61,10 +61,10 @@
 | 파일 | 책임 | 태스크 |
 | --- | --- | --- |
 | `app/controllers/concerns/jsonapi_query.rb` (수정) | concern 진입점과 액션별 검증만 남긴다 | 1 |
-| `app/jsonapi/raw_query.rb` (생성) | `RawQuery` + `ShapeTree` — 쿼리 문자열 디코딩과 형태 충돌 판정 | 1 |
-| `app/jsonapi/query_parser.rb` (생성) | 파싱과 scope 적용 | 1, 2 |
-| `app/jsonapi/pagination.rb` (생성) | offset · probe · 링크 조립 | 1, 3 |
-| `app/jsonapi/cursor.rb` (생성) | 커서 인코딩·디코딩, keyset 술어 | 4 |
+| `app/lib/jsonapi/raw_query.rb` (생성) | `RawQuery` + `ShapeTree` — 쿼리 문자열 디코딩과 형태 충돌 판정 | 1 |
+| `app/lib/jsonapi/query_parser.rb` (생성) | 파싱과 scope 적용 | 1, 2 |
+| `app/lib/jsonapi/pagination.rb` (생성) | offset · probe · 링크 조립 | 1, 3 |
+| `app/lib/jsonapi/cursor.rb` (생성) | 커서 인코딩·디코딩, keyset 술어 | 4 |
 | `app/controllers/api/v1/examples_controller.rb` (수정) | 풍부해진 `query_contract` | 2 |
 | `app/controllers/concerns/crud_actions.rb` (수정) | `meta`와 `links`를 조건부로 | 3 |
 | `app/controllers/api/v1/example_categories_controller.rb` (생성) | 선언만. 읽기 전용 | 5 |
@@ -80,9 +80,9 @@
 
 **Files:**
 - Modify: `app/controllers/concerns/jsonapi_query.rb` (549줄 → ~130줄)
-- Create: `app/jsonapi/raw_query.rb`
-- Create: `app/jsonapi/query_parser.rb`
-- Create: `app/jsonapi/pagination.rb`
+- Create: `app/lib/jsonapi/raw_query.rb`
+- Create: `app/lib/jsonapi/query_parser.rb`
+- Create: `app/lib/jsonapi/pagination.rb`
 - Test: 기존 spec 전부가 안전망 (새 spec 없음)
 
 **Interfaces:**
@@ -95,7 +95,7 @@
 
 **이 태스크는 순수 이동이다.** 로직을 한 줄도 바꾸지 않는다. cursor를 얹으면 이 파일이 700줄을 넘으므로 그 전에 쪼갠다 — 스펙 §5.3.
 
-`app/` 아래이므로 Rails autoload가 `Jsonapi::RawQuery` → `app/jsonapi/raw_query.rb`로 그대로 잡는다. 네임스페이스가 필요한 이유는 `app/jsonapi/`가 autoload 루트가 아니라 `app/`이 루트이기 때문이다.
+Rails는 `app/*` **각각을** Zeitwerk 루트로 등록한다(`paths.add "app", glob: "{*,*/concerns}"`). 따라서 `app/jsonapi/raw_query.rb`는 최상위 `RawQuery`를 정의해야 하고, `Jsonapi::RawQuery`를 넣으면 `NameError`가 난다 — 저장소 안의 증거는 `app/errors/json_api_error.rb`가 최상위 `JsonApiError`를 정의한다는 것이다. `app/lib`는 그 자체가 루트이므로 `app/lib/jsonapi/raw_query.rb` → `Jsonapi::RawQuery`가 설정 한 줄 없이 성립한다. 덤으로 SimpleCov의 `track_files "app/**/*.rb"`에도 걸린다 — 최상위 `lib/`에 두었다면 커버리지 추적에서 조용히 빠졌을 자리다.
 
 - [ ] **Step 1: 기존 spec이 통과하는 것을 먼저 확인한다**
 
@@ -103,7 +103,7 @@ Run: `bundle exec rspec`
 
 Expected: 전부 통과. 이것이 이 태스크의 안전망이므로 시작점이 초록인지부터 본다. 빨간 것이 있으면 그것은 이 태스크의 red가 아니라 사전 상태이므로 **그 자리에서 멈추고 보고한다.**
 
-- [ ] **Step 2: `app/jsonapi/raw_query.rb`를 만든다**
+- [ ] **Step 2: `app/lib/jsonapi/raw_query.rb`를 만든다**
 
 `jsonapi_query.rb`의 `RawQuery` 클래스(136-239행)와 그 안의 `ShapeTree`를 통째로 옮긴다. 클래스 본문은 **한 글자도 바꾸지 않는다.** 감싸는 모듈만 더한다.
 
@@ -225,7 +225,7 @@ module Jsonapi
 end
 ```
 
-- [ ] **Step 3: `app/jsonapi/pagination.rb`를 만든다**
+- [ ] **Step 3: `app/lib/jsonapi/pagination.rb`를 만든다**
 
 지금은 offset 계산과 링크 조립만 담는다. Task 3이 probe를 여기 얹는다.
 
@@ -272,7 +272,7 @@ module Jsonapi
 end
 ```
 
-- [ ] **Step 4: `app/jsonapi/query_parser.rb`를 만든다**
+- [ ] **Step 4: `app/lib/jsonapi/query_parser.rb`를 만든다**
 
 `jsonapi_query.rb`의 `Parser` 클래스(242-548행)를 옮긴다. **다섯 곳만 바꾼다:**
 
@@ -418,7 +418,7 @@ Expected: diff 없음.
 - [ ] **Step 8: 커밋**
 
 ```bash
-git add app/controllers/concerns/jsonapi_query.rb app/jsonapi/
+git add app/controllers/concerns/jsonapi_query.rb app/lib/jsonapi/
 git commit -m "refactor: split the JSON:API query concern into focused files
 
 jsonapi_query.rb가 549줄에 RawQuery·ShapeTree·Parser 세 클래스를 담고 있었다.
@@ -433,7 +433,7 @@ spec 전부와 swagger diff가 비는 것으로 확인했다."
 ### Task 2: 쿼리 계약 탈-Example화
 
 **Files:**
-- Modify: `app/jsonapi/query_parser.rb`
+- Modify: `app/lib/jsonapi/query_parser.rb`
 - Modify: `app/controllers/api/v1/examples_controller.rb:48-60`
 - Test: 기존 spec 전부가 안전망
 
@@ -464,7 +464,7 @@ spec 전부와 swagger diff가 비는 것으로 확인했다."
   it "keeps every column and type declaration inside the controller contract" do
     # 쿼리 엔진이 자원을 모른다는 것이 이 단계의 산출물이다. 공유 파서에 자원별
     # 상수가 남아 있으면 두 번째 자원을 추가하는 순간 합집합으로 부풀기 시작한다.
-    source = Rails.root.join("app/jsonapi/query_parser.rb").read
+    source = Rails.root.join("app/lib/jsonapi/query_parser.rb").read
 
     expect(source).not_to include("FILTER_FIELDS")
     expect(source).not_to include("SORT_FIELDS")
@@ -521,7 +521,7 @@ Expected: 두 테스트 모두 FAIL. 파서에 세 상수가 아직 있고, `que
 
 - [ ] **Step 4: 파서가 계약을 읽게 한다**
 
-`app/jsonapi/query_parser.rb`에서 세 상수(`FILTER_FIELDS` · `SORT_FIELDS` · `MAX_SCORE_INTEGER`)를 지우고, `initialize`를 아래로 바꾼다.
+`app/lib/jsonapi/query_parser.rb`에서 세 상수(`FILTER_FIELDS` · `SORT_FIELDS` · `MAX_SCORE_INTEGER`)를 지우고, `initialize`를 아래로 바꾼다.
 
 ```ruby
     def initialize(scope:, request:, action_params:, contract:, model:)
@@ -686,7 +686,7 @@ Expected: 전부 통과하고 **swagger diff가 비어 있다.** 공개 계약�
 - [ ] **Step 7: 커밋**
 
 ```bash
-git add app/jsonapi/query_parser.rb app/controllers/api/v1/examples_controller.rb spec/
+git add app/lib/jsonapi/query_parser.rb app/controllers/api/v1/examples_controller.rb spec/
 git commit -m "refactor: move resource knowledge from the query engine to the contract
 
 JsonapiQuery가 모든 자원이 공유하는 concern인데 Example의 컬럼·타입·기본
@@ -708,8 +708,8 @@ parse_status를 parse_enum으로 일반화한다. 이미 model.defined_enums를 
 ### Task 3: offset 계약 통일 — probe와 `page[totals]`
 
 **Files:**
-- Modify: `app/jsonapi/pagination.rb`
-- Modify: `app/jsonapi/query_parser.rb`
+- Modify: `app/lib/jsonapi/pagination.rb`
+- Modify: `app/lib/jsonapi/query_parser.rb`
 - Modify: `app/controllers/concerns/crud_actions.rb:58-67`
 - Modify: `spec/swagger_helper.rb:360-370` 부근
 - Modify: `Gemfile`
@@ -781,7 +781,7 @@ Expected: 앞 세 개 FAIL(지금은 `meta`가 항상 있고 `links.last`가 항
 
 - [ ] **Step 3: 파서가 `page[totals]`를 받고 probe를 쓰게 한다**
 
-`app/jsonapi/query_parser.rb`의 `parse_page`를 바꾼다.
+`app/lib/jsonapi/query_parser.rb`의 `parse_page`를 바꾼다.
 
 ```ruby
     def parse_page(parameter, raw_value)
@@ -872,7 +872,7 @@ Expected: 앞 세 개 FAIL(지금은 `meta`가 항상 있고 `links.last`가 항
 
 - [ ] **Step 4: `Pagination`이 probe 결과로 링크를 만들게 한다**
 
-`app/jsonapi/pagination.rb`의 `links`를 바꾼다.
+`app/lib/jsonapi/pagination.rb`의 `links`를 바꾼다.
 
 ```ruby
     # `next`는 probe 행의 유무로 판정한다. `last`는 총 개수를 알아야 만들 수 있으므로
@@ -976,7 +976,7 @@ Run: `bundle exec rspec && bundle exec rails rswag:specs:swaggerize && git diff 
 - [ ] **Step 10: 커밋**
 
 ```bash
-git add app/jsonapi/ app/controllers/concerns/crud_actions.rb Gemfile Gemfile.lock spec/ swagger/
+git add app/lib/jsonapi/ app/controllers/concerns/crud_actions.rb Gemfile Gemfile.lock spec/ swagger/
 git commit -m "feat: make totals opt-in and decide next from a probe row
 
 COUNT를 기본 경로에서 뺀다. 요청 크기 +1행을 읽어 next 유무를 판정하고 그 한
@@ -996,9 +996,9 @@ scope.offset(...).limit(...)으로 손수 구현되어 있고 Kaminari 상수나
 ### Task 4: keyset cursor 신설
 
 **Files:**
-- Create: `app/jsonapi/cursor.rb`
-- Modify: `app/jsonapi/query_parser.rb`
-- Modify: `app/jsonapi/pagination.rb`
+- Create: `app/lib/jsonapi/cursor.rb`
+- Modify: `app/lib/jsonapi/query_parser.rb`
+- Modify: `app/lib/jsonapi/pagination.rb`
 - Test: `spec/requests/api/v1/examples_query_spec.rb`
 
 **Interfaces:**
@@ -1056,7 +1056,7 @@ scope.offset(...).limit(...)으로 손수 구현되어 있고 Kaminari 상수나
   end
 ```
 
-nullable 정렬 거부는 request spec으로 실증할 수 없다 — Example의 정렬 컬럼이 전부 NOT NULL이라 공개 계약에 nullable 정렬이 없기 때문이다. **합성 계약으로 단위 테스트한다.** 새 파일 `spec/jsonapi/cursor_spec.rb`를 만든다.
+nullable 정렬 거부는 request spec으로 실증할 수 없다 — Example의 정렬 컬럼이 전부 NOT NULL이라 공개 계약에 nullable 정렬이 없기 때문이다. **합성 계약으로 단위 테스트한다.** 새 파일 `spec/lib/jsonapi/cursor_spec.rb`를 만든다.
 
 ```ruby
 # frozen_string_literal: true
@@ -1157,11 +1157,11 @@ end
 
 - [ ] **Step 2: 테스트가 실패하는 것을 확인한다**
 
-Run: `bundle exec rspec spec/jsonapi/cursor_spec.rb spec/requests/api/v1/examples_query_spec.rb`
+Run: `bundle exec rspec spec/lib/jsonapi/cursor_spec.rb spec/requests/api/v1/examples_query_spec.rb`
 
 Expected: FAIL. `Jsonapi::Cursor`가 아직 없고 `page[after]`가 알려지지 않은 파라미터다.
 
-- [ ] **Step 3: `app/jsonapi/cursor.rb`를 만든다**
+- [ ] **Step 3: `app/lib/jsonapi/cursor.rb`를 만든다**
 
 ```ruby
 # frozen_string_literal: true
@@ -1248,7 +1248,7 @@ end
 
 - [ ] **Step 4: 파서가 커서 파라미터를 받게 한다**
 
-`app/jsonapi/query_parser.rb`의 `parse_page`에 두 파라미터를 더한다.
+`app/lib/jsonapi/query_parser.rb`의 `parse_page`에 두 파라미터를 더한다.
 
 ```ruby
       unless %w[page[number] page[size] page[totals] page[after] page[before]].include?(parameter) &&
@@ -1448,7 +1448,7 @@ swagger가 `page[after]`·`page[before]` 파라미터를 문서화해야 하면 
 - [ ] **Step 8: 커밋**
 
 ```bash
-git add app/jsonapi/ spec/ swagger/
+git add app/lib/jsonapi/ spec/ swagger/
 git commit -m "feat: add keyset cursor pagination
 
 page[after]와 page[before]를 연다. 빈 문자열은 각각 컬렉션의 시작과 끝이다.
@@ -1824,3 +1824,15 @@ ORDER BY name, id를 완전히 커버하지는 않는다 — PostgreSQL은 유�
 **단계 3(인증 이식).** 별도 계획(C2)이 다룬다. 이 계획이 만드는 두 컨트롤러의 `skip_before_action :set_current_user` 두 줄을 C2가 함께 지워야 한다 — C2 계획의 파일 목록에 이 항목을 넣는다.
 
 **정본과의 대조 스크립트.** 스펙 §10의 리스크 표가 "같은 요청 집합을 두 스택에 던져 문서를 비교하는 스크립트를 단계 2에서 만들어 이후 단계마다 재사용한다"고 한다. 만들지 않는다 — A(FastAPI)와 B(NestJS)에서 같은 판단을 했고 이유가 같다. 세 백엔드가 공유하는 도구인데 어디에 둘지가 이 계획 혼자 정할 문제가 아니고, Next.js 스펙 10.4의 3-백엔드 매트릭스 E2E가 그 자동화의 자연스러운 자리다. 세 백엔드가 모두 통일된 뒤 별도 작업으로 만든다. 그때까지 위 완료 조건의 마지막 항목은 수작업 대조로 남는다.
+
+## 정본과 의도적으로 다른 자리
+
+이 브랜치의 최종 리뷰에서 실제로 응답을 대조해 찾아낸, 세 백엔드가 합의하지 않고 남겨 둔 차이다. 프런트엔드 단계가 이걸 다시 발견하지 않도록 여기 적어 둔다.
+
+1. **참조 자원에 쓰기 요청** — FastAPI 405/`HTTP_ERROR`, NestJS 404/`HTTP_ERROR`, Rails 404/`RESOURCE_NOT_FOUND`. 프레임워크 라우팅 방식 차이. E2E는 "쓰기가 열려 있지 않다"만 단언하고 status·code는 백엔드별로 기대한다.
+2. **커서 문자열** — 세 백엔드의 페이로드 형식이 전부 다르다. JSON:API가 opaque로 정의한 값이므로 맞추지 않는다. E2E는 문자열이 아니라 **동작**(링크를 따라가면 정확히 한 번씩 지나는가, 정렬이 다른 커서는 거부되는가)을 비교한다.
+3. **`links.*`의 퍼센트 인코딩** — Ruby의 `URI.encode_www_form`은 `*`를 유지하고 `~`를 인코딩하며 Python은 반대다. 디코딩 값은 같고 Ruby 쪽이 form-urlencoded 스펙을 따른다. E2E는 raw 문자열이 아니라 **디코딩된 쿼리 쌍**으로 비교하되 **순서는 비교한다**.
+4. **단건 조회의 최상위 `links.self`** — Rails는 `request.base_url + request.fullpath`(API 전체에서 유일한 절대 URL)를 내고 정본은 최상위 `links`를 내지 않는다. JSON:API가 최상위 `self`를 "현재 응답 문서를 생성한 링크"로 정의하므로 Rails 동작은 규격에 맞고, 정본이 선택 멤버를 생략할 뿐이다. 같은 이유로 `show`의 `included: []` 누락도 여기 속한다.
+5. **연관 자원 to-many URL** (`/examples/{id}/tags`) — FastAPI와 NestJS는 페이지네이션 `links`와 `meta.totalCount`를 무조건 내고 `page[number]`/`page[size]`를 받는다. Rails는 셋 다 없고 `page[size]`를 `INVALID_QUERY_PARAMETER`로 거부한다. **3중 2가 Rails와 다르므로 읽기 표면에 남은 가장 큰 구멍이고, 이 스펙의 네 단계 어디에도 없어 별도 작업이 필요하다.**
+
+**새 자원을 열 때 정본의 대응 테스트 파일을 나란히 읽는다.** 이번 브랜치에서 위 5번과 `include` 거부가 정확히 그 방법으로 발견됐고, 그 전에 다섯 번의 태스크 리뷰를 통과했다.
