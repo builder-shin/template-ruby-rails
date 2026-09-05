@@ -145,16 +145,9 @@ module JsonapiQuery
   end
 
   def parse_related_collection_page_integer!(raw_value, parameter)
-    max_digits = Jsonapi::Pagination::MAX_SQL_INTEGER.to_s.length
-    unless raw_value.length <= max_digits && /\A[0-9]+\z/.match?(raw_value)
-      raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
-    end
+    value = Jsonapi::Pagination.parse_positive_integer(raw_value)
+    return value if value
 
-    value = Integer(raw_value, 10)
-    return value if value.between?(1, Jsonapi::Pagination::MAX_SQL_INTEGER)
-
-    raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
-  rescue ArgumentError
     raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
   end
 

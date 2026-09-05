@@ -13,7 +13,6 @@ module Jsonapi
   # SQL에 들어가는 것은 선언이 들고 있는 컬럼 이름이다.
   class QueryParser
     FILTER_PARAMETER = /\Afilter\[([^\[\]]+)\](?:\[([^\[\]]+)\])?\z/
-    POSITIVE_INTEGER = /\A[0-9]+\z/
     INTEGER = /\A[+-]?[0-9]+\z/
     UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
     DATETIME_WITH_OFFSET = /\A\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})\z/
@@ -291,15 +290,9 @@ module Jsonapi
     end
 
     def parse_positive_integer(raw_value, parameter)
-      if raw_value.length > Pagination::MAX_SQL_INTEGER.to_s.length || !POSITIVE_INTEGER.match?(raw_value)
-        invalid_query!("INVALID_PAGE", parameter)
-      end
+      value = Pagination.parse_positive_integer(raw_value)
+      return value if value
 
-      value = Integer(raw_value, 10)
-      return value if value.between?(1, Pagination::MAX_SQL_INTEGER)
-
-      invalid_query!("INVALID_PAGE", parameter)
-    rescue ArgumentError
       invalid_query!("INVALID_PAGE", parameter)
     end
 

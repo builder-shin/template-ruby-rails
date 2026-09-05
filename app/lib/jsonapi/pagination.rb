@@ -18,8 +18,25 @@ module Jsonapi
     MAX_PAGE_SIZE = 100
     DEFAULT_PAGE_SIZE = 20
     MAX_SQL_INTEGER = (2**63) - 1
+    POSITIVE_INTEGER = /\A[0-9]+\z/
 
     module_function
+
+    # 문자열을 1..MAX_SQL_INTEGER 범위의 양의 정수로 파싱한다. 실패하면 예외를
+    # 내지 않고 nil을 돌려준다 — `QueryParser`(`invalid_query!`)와
+    # `JsonapiQuery` concern(`JsonApiError`를 직접 raise)이 이 파싱 규칙을
+    # 그대로 공유하면서도 각자 다른 에러 관례를 유지해야 하기 때문이다. 여기서
+    # 예외를 내면 한쪽 관례를 다른 쪽에 강요하게 된다.
+    def parse_positive_integer(raw_value)
+      return nil if raw_value.length > MAX_SQL_INTEGER.to_s.length || !POSITIVE_INTEGER.match?(raw_value)
+
+      value = Integer(raw_value, 10)
+      return nil unless value.between?(1, MAX_SQL_INTEGER)
+
+      value
+    rescue ArgumentError
+      nil
+    end
 
     # `limit`은 probe가 요청 크기보다 한 행 더 읽을 때만 `page_size`와 달라진다.
     # offset은 항상 실제 페이지 크기(`page_size`) 기준이어야 한다 — limit을 offset

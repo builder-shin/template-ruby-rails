@@ -1827,12 +1827,12 @@ ORDER BY name, id를 완전히 커버하지는 않는다 — PostgreSQL은 유�
 
 ## 정본과 의도적으로 다른 자리
 
-이 브랜치의 최종 리뷰에서 실제로 응답을 대조해 찾아낸, 세 백엔드가 합의하지 않고 남겨 둔 차이다. 프런트엔드 단계가 이걸 다시 발견하지 않도록 여기 적어 둔다.
+이 브랜치의 최종 리뷰에서 실제로 응답을 대조해 찾아낸, 세 백엔드가 합의하지 않고 남겨 둔 차이다. 프런트엔드 단계가 이걸 다시 발견하지 않도록 여기 적어 둔다. 넷은 세 백엔드 모두에 여전히 열려 있고, 하나(5번)는 Rails 쪽은 닫혔고 NestJS 쪽 후속 작업으로 넘어갔다.
 
 1. **참조 자원에 쓰기 요청** — FastAPI 405/`HTTP_ERROR`, NestJS 404/`HTTP_ERROR`, Rails 404/`RESOURCE_NOT_FOUND`. 프레임워크 라우팅 방식 차이. E2E는 "쓰기가 열려 있지 않다"만 단언하고 status·code는 백엔드별로 기대한다.
 2. **커서 문자열** — 세 백엔드의 페이로드 형식이 전부 다르다. JSON:API가 opaque로 정의한 값이므로 맞추지 않는다. E2E는 문자열이 아니라 **동작**(링크를 따라가면 정확히 한 번씩 지나는가, 정렬이 다른 커서는 거부되는가)을 비교한다.
 3. **`links.*`의 퍼센트 인코딩** — Ruby의 `URI.encode_www_form`은 `*`를 유지하고 `~`를 인코딩하며 Python은 반대다. 디코딩 값은 같고 Ruby 쪽이 form-urlencoded 스펙을 따른다. E2E는 raw 문자열이 아니라 **디코딩된 쿼리 쌍**으로 비교하되 **순서는 비교한다**.
 4. **단건 조회의 최상위 `links.self`** — Rails는 `request.base_url + request.fullpath`(API 전체에서 유일한 절대 URL)를 내고 정본은 최상위 `links`를 내지 않는다. JSON:API가 최상위 `self`를 "현재 응답 문서를 생성한 링크"로 정의하므로 Rails 동작은 규격에 맞고, 정본이 선택 멤버를 생략할 뿐이다. 같은 이유로 `show`의 `included: []` 누락도 여기 속한다.
-5. **연관 자원 to-many URL** (`/examples/{id}/tags`) — FastAPI와 NestJS는 페이지네이션 `links`와 `meta.totalCount`를 무조건 내고 `page[number]`/`page[size]`를 받는다. Rails는 셋 다 없고 `page[size]`를 `INVALID_QUERY_PARAMETER`로 거부한다. **3중 2가 Rails와 다르므로 읽기 표면에 남은 가장 큰 구멍이고, 이 스펙의 네 단계 어디에도 없어 별도 작업이 필요하다.**
+5. **연관 자원 to-many URL** (`/examples/{id}/tags`) — **해소됨.** Rails가 정본과 같은 계약을 구현한다: `page[number]`·`page[size]`만 받고, `meta.totalCount`와 non-null `links.last`를 무조건 내며, 대상 PK 오름차순으로 자른다. **남은 갈림은 NestJS 쪽이다** — NestJS의 `parseRelatedCollectionQuery`는 `page[totals]`를 받아서 무시하는데, 자기 링크 빌더가 모든 링크에 `page[totals]=true`를 실어 보내기 때문에 거부하면 자기가 발행한 링크를 자기가 거부하게 되어서다. 정본과 Rails는 받지도 않고 싣지도 않아 자기일관적이다. **B의 후속 항목이다.**
 
 **새 자원을 열 때 정본의 대응 테스트 파일을 나란히 읽는다.** 이번 브랜치에서 위 5번과 `include` 거부가 정확히 그 방법으로 발견됐고, 그 전에 다섯 번의 태스크 리뷰를 통과했다.
