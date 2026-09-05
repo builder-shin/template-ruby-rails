@@ -26,7 +26,7 @@ paths:
               schema:
                 "$ref": "#/components/schemas/ExampleDocument"
       security:
-      - cookieAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -60,7 +60,7 @@ paths:
               schema:
                 "$ref": "#/components/schemas/ExampleDocument"
       security:
-      - cookieAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -83,7 +83,7 @@ paths:
               schema:
                 "$ref": "#/components/schemas/ExampleDocument"
       security:
-      - cookieAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -96,7 +96,7 @@ paths:
         '204':
           description: No Content
       security:
-      - cookieAuth: []
+      - BearerAuth: []
   "/api/v1/examples/{id}/relationships/category":
     parameters:
     - name: id
@@ -120,7 +120,7 @@ paths:
         '204':
           description: No Content
       security:
-      - cookieAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -167,7 +167,7 @@ paths:
         '204':
           description: No Content
       security:
-      - cookieAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -180,7 +180,7 @@ paths:
         '204':
           description: No Content
       security:
-      - cookieAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -193,7 +193,7 @@ paths:
         '204':
           description: No Content
       security:
-      - cookieAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -271,13 +271,262 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleTagDocument"
+  "/api/v1/users/me":
+    get:
+      summary: 내 프로필 조회
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/UserDocument"
+      security:
+      - BearerAuth: []
+  "/api/v1/auth/register":
+    post:
+      summary: 가입
+      responses:
+        '201':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/UserDocument"
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/AuthRegisterDocument"
+  "/api/v1/auth/login":
+    post:
+      summary: 로그인
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/AuthTokenDocument"
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/AuthLoginDocument"
+  "/api/v1/auth/refresh":
+    post:
+      summary: Refresh token 회전
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/AuthTokenDocument"
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/RefreshTokenDocument"
+  "/api/v1/auth/logout":
+    post:
+      summary: 로그아웃
+      responses:
+        '204':
+          description: No Content
+      requestBody:
+        required: true
+        content:
+          application/vnd.api+json:
+            schema:
+              "$ref": "#/components/schemas/RefreshTokenDocument"
 components:
   securitySchemes:
-    cookieAuth:
-      type: apiKey
-      in: cookie
-      name: session_web
+    BearerAuth:
+      type: http
+      scheme: bearer
   schemas:
+    UserIdentifier:
+      type: object
+      required:
+      - type
+      - id
+      properties:
+        type:
+          type: string
+          enum:
+          - users
+        id:
+          type: string
+          format: uuid
+    UserAttributes:
+      type: object
+      required:
+      - email
+      - isActive
+      - createdAt
+      - updatedAt
+      properties:
+        email:
+          type: string
+          format: email
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+    UserResource:
+      allOf:
+      - "$ref": "#/components/schemas/UserIdentifier"
+      - type: object
+        required:
+        - attributes
+        - links
+        properties:
+          attributes:
+            "$ref": "#/components/schemas/UserAttributes"
+          links:
+            type: object
+    UserDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          "$ref": "#/components/schemas/UserResource"
+    AuthCredentialsAttributes:
+      type: object
+      required:
+      - email
+      - password
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          minLength: 12
+          maxLength: 128
+    AuthRegisterDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          type: object
+          required:
+          - type
+          - attributes
+          properties:
+            type:
+              type: string
+              enum:
+              - users
+            attributes:
+              "$ref": "#/components/schemas/AuthCredentialsAttributes"
+    AuthLoginDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          type: object
+          required:
+          - type
+          - attributes
+          properties:
+            type:
+              type: string
+              enum:
+              - authCredentials
+            attributes:
+              "$ref": "#/components/schemas/AuthCredentialsAttributes"
+    RefreshTokenAttributes:
+      type: object
+      required:
+      - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          minLength: 1
+    RefreshTokenDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          type: object
+          required:
+          - type
+          - attributes
+          properties:
+            type:
+              type: string
+              enum:
+              - refreshTokens
+            attributes:
+              "$ref": "#/components/schemas/RefreshTokenAttributes"
+    AuthTokenIdentifier:
+      type: object
+      required:
+      - type
+      - id
+      properties:
+        type:
+          type: string
+          enum:
+          - authTokens
+        id:
+          type: string
+          format: uuid
+    AuthTokenAttributes:
+      type: object
+      required:
+      - accessToken
+      - refreshToken
+      - tokenType
+      - expiresIn
+      - refreshExpiresIn
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          enum:
+          - Bearer
+        expiresIn:
+          type: integer
+          minimum: 0
+        refreshExpiresIn:
+          type: integer
+          minimum: 0
+    AuthTokenResource:
+      allOf:
+      - "$ref": "#/components/schemas/AuthTokenIdentifier"
+      - type: object
+        required:
+        - attributes
+        properties:
+          attributes:
+            "$ref": "#/components/schemas/AuthTokenAttributes"
+    AuthTokenDocument:
+      type: object
+      required:
+      - data
+      properties:
+        data:
+          "$ref": "#/components/schemas/AuthTokenResource"
     ExampleIdentifier:
       type: object
       required:

@@ -42,10 +42,10 @@ RSpec.describe "Sample domain architecture" do
     expect(violations).to be_empty, "legacy references found:\n#{violations.join("\n")}"
   end
 
-  it "retains the required authentication, background job, and storage integrations" do
+  it "retains the required background job and storage integrations" do
     contents = tracked_source.values.join("\n")
 
-    expect(contents).to include("AuthServiceClient", "Sidekiq", "ActiveStorage")
+    expect(contents).to include("Sidekiq", "ActiveStorage")
   end
 
   it "documents the executable Example API development contract" do
@@ -53,7 +53,6 @@ RSpec.describe "Sample domain architecture" do
 
     expect(readme).to include(
       "docker compose up --build",
-      "session_web=dev-session",
       "Accept: application/vnd.api+json",
       "Content-Type: application/vnd.api+json",
       "curl --globoff",
@@ -64,8 +63,35 @@ RSpec.describe "Sample domain architecture" do
       "SimpleCov 80%",
       "bundle exec rspec",
       "bundle exec rubocop",
-      "bundle exec brakeman --no-pager -q"
+      "bundle exec brakeman --no-pager -q",
+      # 쓰기 인증의 실제 흐름(가입 → 로그인 → Bearer)이 README에 적혀 있다는 것을
+      # 여기서 고정한다. C2 이전의 외부 인증 stub과 쿠키 세션 설명은 그 흐름과
+      # 함께 사라졌으므로 더 이상 단언하지 않는다.
+      "/api/v1/auth/register",
+      "/api/v1/auth/login",
+      "/api/v1/auth/refresh",
+      "/api/v1/auth/logout",
+      "Authorization: Bearer"
     )
-    expect(readme).to match(/Auth stub.*development.*production.*AUTH_SERVICE_URL/im)
+  end
+
+  # 정본이 테스트로 고정한 두 보안 주의를 Rails README에도 고정한다
+  # (정본 `tests/docs/test_readme.py::test_readme_documents_token_storage_and_logout_limit`).
+  #
+  # 둘 다 이 구현의 실제 성질이다. (1) 토큰은 cookie가 아니라 JSON body로만 나가고
+  # 인증은 `Authorization` 헤더로만 받는다. (2) `Auth::RefreshSessions.logout`은 refresh
+  # session만 폐기하므로 이미 발급된 access token은 `JWT_ACCESS_EXPIRES_SECONDS`(기본 900초)
+  # 까지 그대로 유효하다 — 템플릿 사용자가 "로그아웃했으니 끝"이라고 오해하기 좋은 자리다.
+  it "documents the token storage and logout limits the canonical template pins" do
+    readme = read_project_file("README.md")
+
+    expect(readme).to include(
+      "안전하게 보관",
+      "cookie에 저장하지 않고",
+      "JSON body",
+      "logout",
+      "JWT_ACCESS_EXPIRES_SECONDS",
+      "15분"
+    )
   end
 end

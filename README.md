@@ -1,8 +1,9 @@
 # Template Ruby Rails
 
-Ruby on Rails 8 기반 JSON:API 백엔드 템플릿입니다. 공개 읽기 API, 외부 Auth 서비스의
-쿠키 세션을 이용한 쓰기 인증, PostgreSQL, Sidekiq/Redis, ActiveStorage를 포함합니다.
-예제 도메인은 단일 `Example` 리소스이며 category와 tags는 관계로만 공개합니다.
+Ruby on Rails 8 기반 JSON:API 백엔드 템플릿입니다. 공개 읽기 API, 로컬 JWT 기반
+가입·로그인과 `Authorization: Bearer` 쓰기 인증, PostgreSQL, Sidekiq/Redis,
+ActiveStorage를 포함합니다. 예제 도메인은 단일 `Example` 리소스이며 category와 tags는
+관계로만 공개합니다.
 
 ## 기술 스택
 
@@ -24,7 +25,6 @@ docker compose up --build
 
 - `db`: PostgreSQL
 - `redis`: Sidekiq broker
-- `auth-stub`: 개발 인증 응답을 제공하는 WireMock
 - `migrate`: `bin/rails db:prepare` 실행 후 종료
 - `api`: `http://localhost:4000`
 - `worker`: Sidekiq worker
@@ -41,12 +41,6 @@ curl -fsS http://localhost:4000/health/ready
 docker compose down -v --remove-orphans
 ```
 
-### 개발용 Auth stub
-
-Auth stub은 development 전용입니다. `session_web=dev-session` 쿠키에만 고정된 개발
-사용자를 반환합니다. production에서는 이 stub을 사용하지 않으며 실제 외부 인증 서비스의
-`AUTH_SERVICE_URL`을 반드시 설정해야 합니다.
-
 ## 로컬 Ruby로 실행
 
 Ruby 3.4.8, PostgreSQL, Redis가 필요합니다.
@@ -58,8 +52,9 @@ bin/rails db:prepare
 bin/rails server -p 4000
 ```
 
-`.env`의 `DATABASE_HOST`, `DEV_DATABASE_*`, `REDIS_URL`, `AUTH_SERVICE_URL`을 로컬
-환경에 맞게 설정합니다. API 문서는 `http://localhost:4000/api-docs`에서 확인할 수 있습니다.
+`.env`의 `DATABASE_HOST`, `DEV_DATABASE_*`, `REDIS_URL`, `JWT_SECRET_KEY`를 로컬
+환경에 맞게 설정합니다. `JWT_SECRET_KEY`는 코드에 기본값이 없어 비어 있으면 부팅이
+실패합니다. API 문서는 `http://localhost:4000/api-docs`에서 확인할 수 있습니다.
 
 ## JSON:API 사용
 
@@ -70,8 +65,71 @@ Accept: application/vnd.api+json
 Content-Type: application/vnd.api+json
 ```
 
-읽기는 공개되어 있으며 쓰기에는 유효한 `session_web` 쿠키가 필요합니다. Compose 환경에서는
-다음과 같이 개발 쿠키를 사용할 수 있습니다.
+읽기는 공개되어 있으며 Example 쓰기에는 유효한 `Authorization: Bearer` 액세스 토큰이
+필요합니다. 토큰은 아래 인증 절차로 직접 발급받습니다.
+
+### 인증
+
+가입 후 로그인하면 access/refresh 토큰 쌍(`authTokens`)을 받습니다. `accessToken`을
+`Authorization: Bearer` 헤더에 실어 보호된 라우트(Example 쓰기, `/api/v1/users/me`)를
+호출합니다.
+
+```text
+POST /api/v1/auth/register  data.type=users           -> 201 users            (Location: /api/v1/users/me)
+POST /api/v1/auth/login     data.type=authCredentials -> 200 authTokens
+POST /api/v1/auth/refresh   data.type=refreshTokens   -> 200 authTokens
+POST /api/v1/auth/logout    data.type=refreshTokens   -> 204
+```
+
+가입합니다.
+
+```bash
+curl -i -X POST \
+  -H 'Accept: application/vnd.api+json' \
+  -H 'Content-Type: application/vnd.api+json' \
+  --data '{"data":{"type":"users","attributes":{"email":"dev@example.com","password":"correct-horse-battery"}}}' \
+  http://localhost:4000/api/v1/auth/register
+```
+
+로그인해서 토큰을 받습니다.
+
+```bash
+curl -fsS -X POST \
+  -H 'Accept: application/vnd.api+json' \
+  -H 'Content-Type: application/vnd.api+json' \
+  --data '{"data":{"type":"authCredentials","attributes":{"email":"dev@example.com","password":"correct-horse-battery"}}}' \
+  http://localhost:4000/api/v1/auth/login
+```
+
+응답의 `data.attributes.accessToken`을 이후 요청의 `Authorization` 헤더에 사용합니다.
+
+```bash
+ACCESS_TOKEN=발급받은-accessToken
+
+curl -fsS \
+  -H 'Accept: application/vnd.api+json' \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  http://localhost:4000/api/v1/users/me
+```
+
+`accessToken`이 만료되면 `data.attributes.refreshToken`으로 새 토큰 쌍을 발급받고
+(`/api/v1/auth/refresh`), 더 이상 필요 없어지면 같은 `refreshToken`으로 로그아웃합니다
+(`/api/v1/auth/logout`, 204, 본문 없음).
+
+`refreshToken`은 클라이언트의 보안 저장소에 안전하게 보관해야 합니다. 서버는 토큰을
+cookie에 저장하지 않고 JSON body로만 발급하며, 인증도 `Authorization` 헤더로만 받습니다.
+위 `ACCESS_TOKEN` 같은 shell 변수는 예제 요청을 마친 뒤 `unset`하거나 shell을 종료합니다.
+
+`logout`은 refresh session만 폐기합니다 — **이미 발급된 access token은 폐기되지 않고
+만료될 때까지 그대로 유효합니다**(`JWT_ACCESS_EXPIRES_SECONDS`, 기본 `900`초이므로 최대
+15분). 로그아웃 즉시 모든 접근을 끊어야 하는 서비스라면 access token 수명을 더 줄이거나
+별도의 폐기 목록을 두어야 합니다.
+
+로그인과 회전마다 `refresh_sessions`에 행이 쌓이고 로그아웃은 `revoked_at`만 표시하므로,
+`PurgeExpiredRefreshSessionsJob`이 만료된 지 `REFRESH_SESSION_RETENTION_SECONDS`(기본 7일)를
+넘긴 행을 오래된 순서로 배치 삭제합니다. 일정은 `config/sidekiq_cron.yml`에 있고 `worker`
+서비스(`bundle exec sidekiq`)가 실행합니다 — 이 잡은 토큰을 만들지 않지만 Rails는 모든
+프로세스가 모든 초기화자를 로드하므로 worker에도 `JWT_SECRET_KEY`가 필요합니다.
 
 ### Example CRUD
 
@@ -83,13 +141,13 @@ curl -fsS \
   http://localhost:4000/api/v1/examples
 ```
 
-Example을 생성합니다.
+Example을 생성합니다(`$ACCESS_TOKEN`은 위 "인증" 절에서 로그인으로 받은 값).
 
 ```bash
 curl -i -X POST \
   -H 'Accept: application/vnd.api+json' \
   -H 'Content-Type: application/vnd.api+json' \
-  -H 'Cookie: session_web=dev-session' \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   --data '{"data":{"type":"examples","attributes":{"title":"Compose Example","status":"draft","score":0}}}' \
   http://localhost:4000/api/v1/examples
 ```
@@ -134,7 +192,7 @@ Category를 교체하는 예시입니다.
 curl -i -X PATCH \
   -H 'Accept: application/vnd.api+json' \
   -H 'Content-Type: application/vnd.api+json' \
-  -H 'Cookie: session_web=dev-session' \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   --data '{"data":{"type":"exampleCategories","id":"CATEGORY_UUID"}}' \
   http://localhost:4000/api/v1/examples/EXAMPLE_UUID/relationships/category
 ```
@@ -175,8 +233,10 @@ docker build -t template-ruby-rails:production .
 
 ```text
 app/controllers/api/v1/examples_controller.rb  Example API 정책
+app/controllers/api/v1/auth_controller.rb       가입·로그인·refresh·로그아웃
 app/controllers/concerns/crud_actions.rb        공통 CRUD 및 관계 동작
-app/services/auth_service_client.rb             외부 Auth 연동
+app/controllers/concerns/jsonapi_authentication.rb  Bearer 액세스 토큰 가드
+app/lib/auth/                                    비밀번호 해시, JWT, refresh 세션 원시 함수
 app/jobs/                                        Sidekiq 작업
 config/routes.rb                                 API와 health 경로
 docker-compose.yml                               개발 스택

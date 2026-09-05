@@ -6,7 +6,6 @@ require "yaml"
 RSpec.describe "Development container contract" do
   let(:compose_path) { Rails.root.join("docker-compose.yml") }
   let(:dockerfile_path) { Rails.root.join("Dockerfile") }
-  let(:dockerignore_path) { Rails.root.join(".dockerignore") }
 
   def read_yaml(path)
     expect(path).to exist
@@ -21,12 +20,8 @@ RSpec.describe "Development container contract" do
     compose.fetch("services")
   end
 
-  def mapping(name)
-    read_yaml(Rails.root.join("docker/wiremock/mappings/#{name}.json"))
-  end
-
   it "defines exactly the development services and named data volumes" do
-    expect(services.keys).to contain_exactly("db", "redis", "auth-stub", "migrate", "api", "worker")
+    expect(services.keys).to contain_exactly("db", "redis", "migrate", "api", "worker")
     expect(compose.fetch("volumes").keys).to contain_exactly("postgres_data", "redis_data")
   end
 
@@ -55,7 +50,6 @@ RSpec.describe "Development container contract" do
         "DEV_DATABASE_USERNAME" => "postgres",
         "DEV_DATABASE_PASSWORD" => "postgres",
         "DEV_DATABASE_NAME" => "template_development",
-        "AUTH_SERVICE_URL" => "http://auth-stub:8080",
         "ACTIVE_JOB_QUEUE_ADAPTER" => "sidekiq",
         "SKIP_TEST_DATABASE" => "1",
         "PORT" => "4000"
@@ -94,33 +88,8 @@ RSpec.describe "Development container contract" do
     expect(dockerfile).not_to include("/health/live")
   end
 
-  it "matches only the development session cookie in the successful Auth stub mapping" do
-    success = mapping("auth-me-success")
-    unauthorized = mapping("auth-me-unauthorized")
-
-    expect(success).to include("priority" => 1)
-    expect(success.fetch("request")).to eq(
-      "method" => "GET",
-      "urlPath" => "/api/auth/me",
-      "headers" => { "Cookie" => { "equalTo" => "session_web=dev-session" } }
-    )
-    expect(success.dig("response", "status")).to eq(200)
-    expect(JSON.parse(success.dig("response", "jsonBody").to_json)).to include(
-      "success" => true,
-      "data" => include("member_status" => "active")
-    )
-
-    expect(unauthorized).to include("priority" => 10)
-    expect(unauthorized.fetch("request")).to eq(
-      "method" => "GET",
-      "urlPath" => "/api/auth/me"
-    )
-    expect(unauthorized.dig("response", "status")).to eq(401)
-  end
-
-  it "keeps the Auth stub out of the final production image and runs Puma only" do
+  it "keeps development and test dependencies out of the final production image and runs Puma only" do
     dockerfile = dockerfile_path.read
-    dockerignore = dockerignore_path.readlines(chomp: true)
 
     expect(dockerfile.scan(/^FROM /).length).to be >= 4
     expect(dockerfile).to match(/^FROM .+ AS base$/)
@@ -129,7 +98,5 @@ RSpec.describe "Development container contract" do
     expect(dockerfile).to include('BUNDLE_WITHOUT="development:test"')
     expect(dockerfile.lines.grep(/^CMD /).last.strip)
       .to eq('CMD ["bundle", "exec", "puma", "-C", "config/puma.rb"]')
-    expect(dockerfile).not_to include("docker/wiremock")
-    expect(dockerignore).to include("/docker/wiremock")
   end
 end

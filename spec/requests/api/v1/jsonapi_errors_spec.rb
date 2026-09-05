@@ -23,8 +23,12 @@ RSpec.describe "JSON:API errors", type: :request do
     INTERNAL_SERVER_ERROR
     HTTP_ERROR
     AUTHENTICATION_REQUIRED
-    FORBIDDEN
-    AUTH_SERVICE_UNAVAILABLE
+    INVALID_TOKEN
+    TOKEN_EXPIRED
+    USER_INACTIVE
+    EMAIL_ALREADY_REGISTERED
+    INVALID_CREDENTIALS
+    TOKEN_REVOKED
   ].freeze
 
   def expect_error(status:, code:)
@@ -84,14 +88,6 @@ RSpec.describe "JSON:API errors", type: :request do
           params.require(:data)
         end
 
-        def authentication_required
-          user_check!
-        end
-
-        def forbidden
-          enterprise_check!
-        end
-
         def validation_failure
           Example.new.validate!
         end
@@ -108,8 +104,6 @@ RSpec.describe "JSON:API errors", type: :request do
 
       Rails.application.routes.draw do
         get "/api/__task_five__/errors/parameter_missing", to: "task_five_api_probe#parameter_missing"
-        get "/api/__task_five__/errors/authentication_required", to: "task_five_api_probe#authentication_required"
-        get "/api/__task_five__/errors/forbidden", to: "task_five_api_probe#forbidden"
         get "/api/__task_five__/errors/validation", to: "task_five_api_probe#validation_failure"
         get "/api/__task_five__/errors/unexpected", to: "task_five_api_probe#unexpected_failure"
         get "/api/__task_five__/errors/typo", to: "task_five_api_probe#typo_code"
@@ -143,29 +137,6 @@ RSpec.describe "JSON:API errors", type: :request do
 
       expect_error(status: 404, code: "RESOURCE_NOT_FOUND")
       expect(parsed_body.fetch("errors").first).to include("title" => "Resource not found")
-    end
-
-    it "maps missing authentication to AUTHENTICATION_REQUIRED" do
-      get "#{base_path}/authentication_required", headers: jsonapi_headers
-
-      expect_error(status: 401, code: "AUTHENTICATION_REQUIRED")
-    end
-
-    it "maps authorization failure to FORBIDDEN" do
-      mock_authenticated_user
-
-      get "#{base_path}/forbidden", headers: jsonapi_headers(cookie: "valid-session")
-
-      expect_error(status: 403, code: "FORBIDDEN")
-    end
-
-    it "maps auth service failures to AUTH_SERVICE_UNAVAILABLE without exposing details" do
-      mock_auth_service_unavailable
-
-      get "#{base_path}/authentication_required", headers: jsonapi_headers(cookie: "valid-session")
-
-      expect_error(status: 503, code: "AUTH_SERVICE_UNAVAILABLE")
-      expect(response.body).not_to include("인증 서비스에 연결할 수 없습니다")
     end
 
     it "maps record validation errors to a stable attribute pointer" do

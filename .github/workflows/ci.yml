@@ -28,6 +28,10 @@ jobs:
       TEST_DATABASE_USERNAME: postgres
       TEST_DATABASE_PASSWORD: postgres
       TEST_DATABASE_NAME: template_test
+      # JWT_SECRET_KEY는 config/initializers/auth.rb에 코드 기본값이 없다 —
+      # dev/test fallback조차 두지 않았으므로(토큰 서명 키가 소스에 박히는 것을
+      # 피하려고) CI가 뜨려면 여기서 명시해야 한다. 운영 값이 아니다.
+      JWT_SECRET_KEY: ci-only-jwt-secret-key-do-not-use-in-production-32bytes
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1

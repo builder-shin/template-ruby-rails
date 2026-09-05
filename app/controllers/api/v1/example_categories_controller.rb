@@ -14,15 +14,9 @@ module Api
     #
     # URL 경로는 `/api/v1/categories`이고 JSON:API type은 `exampleCategories`다.
     # 둘이 다른 것은 의도된 결정이다.
-    #
-    # `skip_before_action :set_current_user`는 읽기가 공개이기 때문이다. 이 줄은
-    # 인증 이식(C2)이 그 콜백 자체를 없앨 때 함께 지워야 한다 — skip_before_action은
-    # 없는 콜백을 건너뛰려 하면 ArgumentError를 낸다.
     class ExampleCategoriesController < ApiController
       RESOURCE_UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
       private_constant :RESOURCE_UUID
-
-      skip_before_action :set_current_user
 
       def allowed_includes
         []

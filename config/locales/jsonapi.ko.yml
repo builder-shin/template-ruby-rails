@@ -55,9 +55,21 @@ ko:
       AUTHENTICATION_REQUIRED:
         title: "인증 필요"
         detail: "로그인 후 이용해 주세요."
-      FORBIDDEN:
-        title: "접근 금지"
-        detail: "이 리소스에 접근할 권한이 없습니다."
-      AUTH_SERVICE_UNAVAILABLE:
-        title: "인증 서비스 이용 불가"
-        detail: "인증 서비스를 일시적으로 이용할 수 없습니다."
+      INVALID_TOKEN:
+        title: "유효하지 않은 토큰"
+        detail: "인증 토큰이 유효하지 않습니다."
+      TOKEN_EXPIRED:
+        title: "만료된 토큰"
+        detail: "인증 토큰이 만료되었습니다."
+      USER_INACTIVE:
+        title: "비활성 사용자"
+        detail: "비활성화된 계정입니다."
+      EMAIL_ALREADY_REGISTERED:
+        title: "이미 등록된 이메일"
+        detail: "이미 등록된 이메일입니다."
+      INVALID_CREDENTIALS:
+        title: "잘못된 인증 정보"
+        detail: "이메일 또는 비밀번호가 올바르지 않습니다."
+      TOKEN_REVOKED:
+        title: "폐기된 토큰"
+        detail: "인증 토큰이 폐기되었습니다."
