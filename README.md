@@ -116,6 +116,12 @@ curl -fsS \
 (`/api/v1/auth/refresh`), 더 이상 필요 없어지면 같은 `refreshToken`으로 로그아웃합니다
 (`/api/v1/auth/logout`, 204, 본문 없음).
 
+로그인과 회전마다 `refresh_sessions`에 행이 쌓이고 로그아웃은 `revoked_at`만 표시하므로,
+`PurgeExpiredRefreshSessionsJob`이 만료된 지 `REFRESH_SESSION_RETENTION_SECONDS`(기본 7일)를
+넘긴 행을 오래된 순서로 배치 삭제합니다. 일정은 `config/sidekiq_cron.yml`에 있고 `worker`
+서비스(`bundle exec sidekiq`)가 실행합니다 — 이 잡은 토큰을 만들지 않지만 Rails는 모든
+프로세스가 모든 초기화자를 로드하므로 worker에도 `JWT_SECRET_KEY`가 필요합니다.
+
 ### Example CRUD
 
 목록을 조회합니다.
