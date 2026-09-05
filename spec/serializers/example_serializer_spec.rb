@@ -111,23 +111,35 @@ RSpec.describe ExampleSerializer do
     context "when related records exist" do
       let(:example) { create(:example, :with_category, :with_tags) }
 
-      it "includes category and tags without non-canonical self links" do
+      it "includes category and tags with their canonical self links" do
         expected = [
           {
             "id" => example.category.id.downcase,
             "type" => "exampleCategories",
-            "attributes" => { "name" => example.category.name }
+            "attributes" => { "name" => example.category.name },
+            "links" => { "self" => "/api/v1/categories/#{example.category.id.downcase}" }
           },
           *example.tags.map do |tag|
             {
               "id" => tag.id.downcase,
               "type" => "exampleTags",
-              "attributes" => { "name" => tag.name }
+              "attributes" => { "name" => tag.name },
+              "links" => { "self" => "/api/v1/tags/#{tag.id.downcase}" }
             }
           end
         ]
 
         expect(document.fetch("included")).to eq(expected)
+      end
+
+      it "gives included reference resources a self link" do
+        included = document.fetch("included")
+
+        category_entry = included.find { |resource| resource.fetch("type") == "exampleCategories" }
+        expect(category_entry.dig("links", "self")).to eq("/api/v1/categories/#{example.category.id.downcase}")
+
+        tag_entry = included.find { |resource| resource.fetch("type") == "exampleTags" }
+        expect(tag_entry.dig("links", "self")).to eq("/api/v1/tags/#{tag_entry.fetch("id")}")
       end
     end
 

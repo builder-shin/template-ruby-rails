@@ -41,6 +41,9 @@
 # Ruby gems
 *.gem
 
+# SimpleCov output (every rspec/gates run regenerates this)
+/coverage/
+
 # OS files
 .DS_Store
 

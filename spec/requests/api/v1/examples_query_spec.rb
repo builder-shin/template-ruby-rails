@@ -28,14 +28,23 @@ RSpec.describe "Example JSON:API query contract", type: :request do
       def query_contract
         {
           filters: {
-            "title" => %w[exact contains],
-            "status" => %w[exact in],
-            "score" => %w[exact gt gte lt lte in],
-            "category.id" => %w[exact in isNull],
-            "createdAt" => %w[exact gt gte lt lte]
+            "title" => { attribute: :title, type: :string, operators: %w[exact contains] },
+            "status" => { attribute: :status, type: :enum, operators: %w[exact in] },
+            "score" => { attribute: :score, type: :integer, operators: %w[exact gt gte lt lte in] },
+            "category.id" => { attribute: :category_id, type: :uuid, operators: %w[exact in isNull] },
+            "createdAt" => { attribute: :created_at, type: :datetime, operators: %w[exact gt gte lt lte] }
           },
-          sorts: %w[title status score createdAt updatedAt],
-          includes: %w[category tags]
+          sorts: {
+            "title" => { attribute: :title, nullable: false },
+            "status" => { attribute: :status, nullable: false },
+            "score" => { attribute: :score, nullable: false },
+            "createdAt" => { attribute: :created_at, nullable: false },
+            "updatedAt" => { attribute: :updated_at, nullable: false }
+          },
+          includes: %w[category tags],
+          default_sort: [ { field: "createdAt", direction: :desc } ],
+          tie_breaker: { field: "id", direction: :asc },
+          default_page_size: 20
         }
       end
     end)
@@ -285,7 +294,8 @@ RSpec.describe "Example JSON:API query contract", type: :request do
   it "uses default and maximum page sizes with totalCount and boundary links" do
     create_list(:example, 97)
 
-    first_page = request_document
+    # totalCount와 last 링크가 이 테스트의 주제이므로 page[totals]=true로 요청한다.
+    first_page = request_document("page[totals]=true")
     expect(first_page.fetch("data").size).to eq(20)
     expect(first_page.fetch("meta")).to eq("totalCount" => 101)
     expect(first_page.fetch("links").keys).to eq(%w[self first prev next last])
@@ -296,7 +306,7 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     )
     expect(decoded_link_query(first_page.dig("links", "last"))).to include("page[number]" => "6")
 
-    maximum_page = request_document("page[size]=200")
+    maximum_page = request_document("page[totals]=true&page[size]=200")
     expect(maximum_page.fetch("data").size).to eq(100)
     expect(maximum_page.fetch("meta")).to eq("totalCount" => 101)
     expect(decoded_link_query(maximum_page.dig("links", "self"))).to include("page[size]" => "100")
@@ -308,7 +318,9 @@ RSpec.describe "Example JSON:API query contract", type: :request do
   end
 
   it "preserves non-page query parameters in every pagination link and uses null boundaries" do
-    query = "filter[status][in]=draft,active&sort=title&include=category&page[number]=2&page[size]=1"
+    # last 링크가 모든 링크 종류를 도는 루프의 대상이므로 page[totals]=true로 요청한다.
+    query = "page[totals]=true&filter[status][in]=draft,active&sort=title&include=category" \
+            "&page[number]=2&page[size]=1"
     document = request_document(query)
     links = document.fetch("links")
     expected_pages = { "self" => "2", "first" => "1", "prev" => "1", "next" => "3", "last" => "3" }
@@ -327,6 +339,13 @@ RSpec.describe "Example JSON:API query contract", type: :request do
         )
       end
     end
+
+    # decoded_link_query는 Hash로 모으므로 순서에는 눈이 멀다 — 여기서는 와이어 그대로의
+    # 키 순서(보존된 파라미터가 원래 순서를 유지한 채 → page[totals] → page[number] →
+    # page[size])를 정본과 맞춰 고정한다.
+    expect(URI.decode_www_form(URI.parse(links.fetch("next")).query).map(&:first)).to eq(
+      %w[filter[status][in] sort include page[totals] page[number] page[size]]
+    )
 
     first_page = request_document("page[number]=1&page[size]=4")
     expect(first_page.dig("links", "prev")).to be_nil
@@ -525,5 +544,330 @@ RSpec.describe "Example JSON:API query contract", type: :request do
         expect(response.body).not_to include("ActionController::BadRequest", "Conflicting types")
       end
     end
+  end
+
+  it "keeps every column and type declaration inside the controller contract" do
+    # 쿼리 엔진이 자원을 모른다는 것이 이 단계의 산출물이다. 공유 파서에 자원별
+    # 상수가 남아 있으면 두 번째 자원을 추가하는 순간 합집합으로 부풀기 시작한다.
+    source = Rails.root.join("app/lib/jsonapi/query_parser.rb").read
+
+    expect(source).not_to include("FILTER_FIELDS")
+    expect(source).not_to include("SORT_FIELDS")
+    expect(source).not_to include("MAX_SCORE_INTEGER")
+    expect(source).not_to match(/def parse_status/)
+  end
+
+  it "sorts by the contract's declared default when no sort is given" do
+    # 기본 정렬이 파서에 하드코딩돼 있으면 categories의 `name ASC`를 낼 수 없다.
+    contract = Api::V1::ExamplesController.new.send(:query_contract)
+
+    expect(contract.fetch(:default_sort)).to eq([ { field: "createdAt", direction: :desc } ])
+    expect(contract.fetch(:tie_breaker)).to eq({ field: "id", direction: :asc })
+    expect(contract.fetch(:default_page_size)).to eq(20)
+  end
+end
+
+RSpec.describe "Example JSON:API pagination contract", type: :request do
+  # page_link이 URI.encode_www_form으로 대괄호를 퍼센트 인코딩하므로
+  # 링크 문자열을 리터럴로 비교하지 않고 쿼리를 디코딩해 비교한다.
+  def decoded_link_query(link)
+    URI.decode_www_form(URI.parse(link).query).to_h
+  end
+
+  it "omits totals and the last link unless page[totals] asks for them" do
+    # COUNT는 큰 테이블에서 목록 조회보다 비싸질 수 있다. 필요하다고 말한 요청에만
+    # 실행한다 — 정본과 같은 계약이다.
+    create_list(:example, 3)
+
+    get "/api/v1/examples", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(document).not_to have_key("meta")
+    expect(document.fetch("links").fetch("last")).to be_nil
+  end
+
+  it "returns totals and a last link when page[totals] is true" do
+    create_list(:example, 3)
+
+    get "/api/v1/examples?page[totals]=true&page[size]=2", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(document.fetch("meta")).to eq("totalCount" => 3)
+    expect(decoded_link_query(document.fetch("links").fetch("last"))).to include("page[number]" => "2")
+  end
+
+  it "preserves page[totals]=true across every pagination link" do
+    # next/prev/first/last/self 전부가 page[totals]=true를 그대로 들고 있어야
+    # 그 링크를 따라간 다음 요청에서도 totals가 끊기지 않는다 — 정본과 같은 계약이다.
+    create_list(:example, 5)
+
+    get "/api/v1/examples?page[totals]=true&page[number]=2&page[size]=1", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    links = document.fetch("links")
+    expect(links.keys).to eq(%w[self first prev next last])
+    links.each_value do |link|
+      expect(decoded_link_query(link)).to include("page[totals]" => "true")
+    end
+
+    # decoded_link_query는 Hash로 모으므로 순서에는 눈이 멀다 — 여기서는 와이어 그대로의
+    # 키 순서(preserved → page[totals] → page[number] → page[size])를 정본과 맞춰 고정한다.
+    expect(URI.decode_www_form(URI.parse(links.fetch("next")).query).map(&:first))
+      .to eq(%w[page[totals] page[number] page[size]])
+  end
+
+  it "decides next from a probe row rather than a count" do
+    # 요청 크기 +1행을 읽어 next 유무를 판정하고 그 한 행은 응답에서 버린다.
+    create_list(:example, 3)
+
+    get "/api/v1/examples?page[size]=2", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(document.fetch("data").length).to eq(2)
+    expect(decoded_link_query(document.fetch("links").fetch("next"))).to include("page[number]" => "2")
+
+    get "/api/v1/examples?page[size]=3", headers: jsonapi_headers
+
+    expect(JSON.parse(response.body).fetch("links").fetch("next")).to be_nil
+  end
+
+  it "rejects a non-boolean page[totals]" do
+    get "/api/v1/examples?page[totals]=yes", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("INVALID_PAGE")
+  end
+
+  it "omits meta from an empty collection unless page[totals] asks for it" do
+    # 짧은 경로(빈 컬렉션)는 render의 short-circuit(`options.slice(:meta, :links).compact`)을
+    # 지난다. `meta`가 없을 때 `{}`로 새지 않는지 여기서 확인한다.
+    get "/api/v1/examples", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(document.fetch("data")).to eq([])
+    expect(document).not_to have_key("meta")
+  end
+
+  it "reports zero totalCount for an empty collection when page[totals] is true" do
+    get "/api/v1/examples?page[totals]=true", headers: jsonapi_headers
+
+    document = JSON.parse(response.body)
+    expect(response).to have_http_status(:ok)
+    expect(document.fetch("data")).to eq([])
+    expect(document.fetch("meta")).to eq("totalCount" => 0)
+  end
+
+  it "walks the whole collection by cursor" do
+    # 커서는 유효 정렬의 컬럼 값들을 인코딩한 opaque 문자열이다. 클라이언트는
+    # 커서를 만들지 않고 links를 따라간다.
+    create_list(:example, 5)
+
+    seen = []
+    url = "/api/v1/examples?page[size]=2&page[after]="
+    while url
+      get url, headers: jsonapi_headers
+      document = JSON.parse(response.body)
+      expect(response).to have_http_status(:ok)
+      seen.concat(document.fetch("data").map { |resource| resource.fetch("id") })
+      url = document.fetch("links").fetch("next")
+    end
+
+    get "/api/v1/examples?page[size]=100", headers: jsonapi_headers
+    expected = JSON.parse(response.body).fetch("data").map { |resource| resource.fetch("id") }
+    expect(seen).to eq(expected)
+  end
+
+  it "walks the whole collection backwards from page[before]=" do
+    # 위 테스트는 page[after]=(컬렉션의 시작)에서 next를 따라 앞으로 간다. 이
+    # 테스트는 page[before]=(컬렉션의 끝)에서 prev를 따라 뒤로 간다 — positioned된
+    # page[before] keyset 술어(strict_comparison의 before: 분기, reversed_order)를
+    # 실제 행으로 지나가는 유일한 자리다. 각 페이지는 이미 표시 순서라서 앞쪽에
+    # 이어붙여야 전체가 정방향 순서로 복원된다.
+    create_list(:example, 5)
+
+    seen = []
+    url = "/api/v1/examples?page[size]=2&page[before]="
+    while url
+      get url, headers: jsonapi_headers
+      expect(response).to have_http_status(:ok)
+      document = JSON.parse(response.body)
+      seen = document.fetch("data").map { |resource| resource.fetch("id") } + seen
+      url = document.fetch("links").fetch("prev")
+    end
+
+    get "/api/v1/examples?page[size]=100", headers: jsonapi_headers
+    expected = JSON.parse(response.body).fetch("data").map { |resource| resource.fetch("id") }
+    expect(seen).to eq(expected)
+  end
+
+  it "walks the whole collection by cursor under a mixed-direction multi-key sort" do
+    # 선두 정렬 컬럼(status, 오름차순)에 값이 반복되고 둘째 컬럼(score, 내림차순)이
+    # 방향을 뒤집는다 — keyset 술어에 붙인 선두 경계(leading bound)의 부등호가
+    # 잘못된 방향이면 이 순회에서 행이 사라지거나 중복된다.
+    statuses = %w[draft active archived]
+    9.times { |index| create(:example, status: statuses[index % statuses.length], score: index * 10) }
+
+    seen = []
+    url = "/api/v1/examples?sort=status,-score&page[size]=2&page[after]="
+    while url
+      get url, headers: jsonapi_headers
+      expect(response).to have_http_status(:ok)
+      document = JSON.parse(response.body)
+      seen.concat(document.fetch("data").map { |resource| resource.fetch("id") })
+      url = document.fetch("links").fetch("next")
+    end
+
+    get "/api/v1/examples?sort=status,-score&page[size]=100", headers: jsonapi_headers
+    expected = JSON.parse(response.body).fetch("data").map { |resource| resource.fetch("id") }
+    expect(seen).to eq(expected)
+  end
+
+  it "rejects a cursor combined with page[number]" do
+    get "/api/v1/examples?page[after]=&page[number]=2", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("INVALID_PAGE")
+  end
+
+  it "rejects combining page[after] and page[before] in either order" do
+    # 이름이 다른 두 파라미터라 @seen_page_parameters 중복 검사만으로는 잡히지
+    # 않는다 — 커서 슬롯 자체가 이미 찼는지를 따로 봐야 한다.
+    queries = [ "page[after]=&page[before]=", "page[before]=&page[after]=" ]
+
+    queries.each do |query|
+      aggregate_failures(query) do
+        get "/api/v1/examples?#{query}", headers: jsonapi_headers
+
+        expect(response).to have_http_status(:bad_request)
+        expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("INVALID_PAGE")
+      end
+    end
+  end
+
+  it "rejects a cursor whose signature does not match the effective sort" do
+    create_list(:example, 3)
+    get "/api/v1/examples?page[size]=1&page[after]=", headers: jsonapi_headers
+    cursor = JSON.parse(response.body).fetch("links").fetch("next")[/page%5Bafter%5D=([^&]*)/, 1]
+
+    get "/api/v1/examples?page[size]=1&sort=title&page[after]=#{cursor}", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("INVALID_PAGE")
+  end
+
+  it "rejects a malformed cursor" do
+    get "/api/v1/examples?page[after]=not-base64url!!", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    document = JSON.parse(response.body)
+    expect(document.dig("errors", 0, "code")).to eq("INVALID_PAGE")
+    expect(document.dig("errors", 0, "source", "parameter")).to eq("page[after]")
+  end
+
+  it "reports page[before], not a hardcoded page[after], when a page[before] cursor is malformed" do
+    # source.parameter는 응답 문서의 필드다 — 구현 세부사항이 아니다. 하드코딩돼
+    # 있으면 page[before]로 보낸 요청의 오류도 page[after]라고 잘못 보고한다.
+    get "/api/v1/examples?page[before]=not-base64url!!", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    document = JSON.parse(response.body)
+    expect(document.dig("errors", 0, "code")).to eq("INVALID_PAGE")
+    expect(document.dig("errors", 0, "source", "parameter")).to eq("page[before]")
+  end
+
+  it "has a null prev link on the first cursor page" do
+    # 정본은 들어온 커서가 비어 있지 않을 때만 prev를 낸다. 컬렉션의 처음(빈
+    # 커서)에서는 offset 모드 1페이지처럼 prev가 없어야 한다.
+    create_list(:example, 3)
+
+    get "/api/v1/examples?page[after]=", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:ok)
+    expect(JSON.parse(response.body).dig("links", "prev")).to be_nil
+  end
+
+  it "has a non-null prev link on the second cursor page" do
+    create_list(:example, 3)
+
+    get "/api/v1/examples?page[size]=1&page[after]=", headers: jsonapi_headers
+    next_link = JSON.parse(response.body).fetch("links").fetch("next")
+    expect(next_link).not_to be_nil
+
+    get next_link, headers: jsonapi_headers
+
+    expect(response).to have_http_status(:ok)
+    expect(JSON.parse(response.body).dig("links", "prev")).not_to be_nil
+  end
+
+  it "echoes the incoming cursor verbatim in the self link" do
+    create_list(:example, 3)
+
+    get "/api/v1/examples?page[size]=1&page[after]=", headers: jsonapi_headers
+    first_page = JSON.parse(response.body)
+    expect(decoded_link_query(first_page.dig("links", "self"))).to include("page[after]" => "")
+
+    next_link = first_page.fetch("links").fetch("next")
+    raw_cursor = decoded_link_query(next_link).fetch("page[after]")
+
+    get next_link, headers: jsonapi_headers
+    second_page = JSON.parse(response.body)
+
+    expect(decoded_link_query(second_page.dig("links", "self"))).to include("page[after]" => raw_cursor)
+  end
+
+  it "always exposes a last link pointing at the end of the collection in cursor mode" do
+    # 총 개수를 몰라도 last를 만들 수 있다 — 빈 문자열이 컬렉션의 끝을 가리킨다.
+    create_list(:example, 3)
+
+    get "/api/v1/examples?page[after]=", headers: jsonapi_headers
+
+    expect(decoded_link_query(JSON.parse(response.body).dig("links", "last"))).to include("page[before]" => "")
+  end
+
+  it "returns the last page and a null next link for page[before]=" do
+    create_list(:example, 5)
+
+    get "/api/v1/examples?page[size]=2&page[before]=", headers: jsonapi_headers
+    expect(response).to have_http_status(:ok)
+    last_page = JSON.parse(response.body)
+
+    get "/api/v1/examples?page[size]=100", headers: jsonapi_headers
+    all_ids = JSON.parse(response.body).fetch("data").map { |resource| resource.fetch("id") }
+
+    expect(last_page.dig("links", "next")).to be_nil
+    expect(last_page.fetch("data").map { |resource| resource.fetch("id") }).to eq(all_ids.last(2))
+  end
+
+  it "supports page[totals]=true in cursor mode across every link" do
+    # sort=score를 같이 보낸다 — preserved 파라미터가 없으면 *preserved를
+    # *totals_pair 뒤로 옮기는 뮤테이션이 이 테스트를 안 깨뜨린다(둘 다 비어
+    # 있으면 순서가 안 보인다).
+    create_list(:example, 5)
+
+    get "/api/v1/examples?sort=score&page[after]=&page[totals]=true&page[size]=2", headers: jsonapi_headers
+    expect(response).to have_http_status(:ok)
+    expect(JSON.parse(response.body).fetch("meta")).to eq("totalCount" => 5)
+    first_next = JSON.parse(response.body).fetch("links").fetch("next")
+
+    # 두 번째 페이지를 쓴다 — 첫 페이지는 prev가 nil이라 다섯 링크 전부를
+    # 순회하는 아래 루프가 nil에 decoded_link_query를 호출하게 된다.
+    get first_next, headers: jsonapi_headers
+    second_page = JSON.parse(response.body)
+
+    expect(response).to have_http_status(:ok)
+    expect(second_page.fetch("meta")).to eq("totalCount" => 5)
+    links = second_page.fetch("links")
+    expect(links.keys).to eq(%w[self first prev next last])
+    links.each_value do |link|
+      expect(decoded_link_query(link)).to include("page[totals]" => "true", "sort" => "score")
+    end
+
+    # decoded_link_query는 Hash로 모으므로 순서에는 눈이 멀다 — 여기서는 와이어 그대로의
+    # 키 순서(preserved → page[totals] → 커서 파라미터 → page[size])를 정본과 맞춰 고정한다.
+    expect(URI.decode_www_form(URI.parse(links.fetch("next")).query).map(&:first))
+      .to eq(%w[sort page[totals] page[after] page[size]])
   end
 end

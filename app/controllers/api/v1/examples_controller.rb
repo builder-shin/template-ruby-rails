@@ -48,19 +48,32 @@ module Api
       def query_contract
         {
           filters: {
-            "title" => %w[exact contains],
-            "status" => %w[exact in],
-            "score" => %w[exact gt gte lt lte in],
-            "category.id" => %w[exact in isNull],
-            "createdAt" => %w[exact gt gte lt lte]
+            "title" => { attribute: :title, type: :string, operators: %w[exact contains] },
+            "status" => { attribute: :status, type: :enum, operators: %w[exact in] },
+            "score" => { attribute: :score, type: :integer, operators: %w[exact gt gte lt lte in] },
+            "category.id" => { attribute: :category_id, type: :uuid, operators: %w[exact in isNull] },
+            "createdAt" => { attribute: :created_at, type: :datetime, operators: %w[exact gt gte lt lte] }
           },
-          sorts: %w[title status score createdAt updatedAt],
-          includes: %w[category tags]
+          sorts: {
+            "title" => { attribute: :title, nullable: false },
+            "status" => { attribute: :status, nullable: false },
+            "score" => { attribute: :score, nullable: false },
+            "createdAt" => { attribute: :created_at, nullable: false },
+            "updatedAt" => { attribute: :updated_at, nullable: false }
+          },
+          includes: %w[category tags],
+          default_sort: [ { field: "createdAt", direction: :desc } ],
+          tie_breaker: { field: "id", direction: :asc },
+          default_page_size: 20
         }
       end
 
       def jsonapi_query_mode
-        { "index" => :collection, "show" => :include_only }.fetch(action_name, :none)
+        {
+          "index" => :collection,
+          "show" => :include_only,
+          "related_tags" => :related_collection
+        }.fetch(action_name, :none)
       end
 
       def allowed_relationships

@@ -67,8 +67,6 @@ gem "dotenv-rails"
 gem "jsonapi.rb"
 # JSON API Serializer를 위한 Gem
 gem "jsonapi-serializer"
-# Pagination을 위한 Gem
-gem "kaminari"
 # CORS 설정을 위한 Gem
 gem "rack-cors"
 # Rate Limiting을 위한 Gem

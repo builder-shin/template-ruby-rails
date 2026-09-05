@@ -144,4 +144,30 @@ RSpec.describe "Example action query allowlists", type: :request do
     expect(example.category_id).to eq(original_category.id)
     expect(example.tag_ids).to eq([ original_tag.id ])
   end
+
+  it "allows only page[number]/page[size] on the tags related collection" do
+    example = create(:example)
+
+    cases = [
+      [ "filter[name]=tag", "INVALID_FILTER", "filter[name]" ],
+      [ "sort=name", "INVALID_SORT", "sort" ],
+      [ "include=tags", "INVALID_INCLUDE", "include" ],
+      # 값 자체는 정수로도 파싱될 값을 쓴다 — page[after]/page[totals]가 허용 목록에
+      # 잘못 끼어들면 각각 page[number]/page[size]로 오인되어 200이 나가 버린다.
+      # 빈 문자열이나 "true"를 쓰면 정수 파싱 실패로도 우연히 같은 INVALID_PAGE가
+      # 나서 허용 목록 자체가 깨져도 테스트가 눈치채지 못한다.
+      [ "page[after]=5", "INVALID_PAGE", "page[after]" ],
+      [ "page[totals]=1", "INVALID_PAGE", "page[totals]" ],
+      [ "page[number]=1&page[number]=2", "INVALID_PAGE", "page[number]" ],
+      [ "bogus=1", "INVALID_QUERY_PARAMETER", "bogus" ]
+    ]
+
+    cases.each do |query, code, parameter|
+      aggregate_failures(query) do
+        get "#{resource_path(example)}/tags?#{query}", headers: jsonapi_headers
+
+        expect_query_error(code, parameter)
+      end
+    end
+  end
 end

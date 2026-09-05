@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
-require "time"
 require "uri"
-require "set"
 
+# JSON:API 조회 파라미터의 concern 진입점.
+#
+# 파싱과 scope 적용은 `Jsonapi::QueryParser`가, 쿼리 문자열 디코딩과 형태 충돌
+# 판정은 `Jsonapi::RawQuery`가, 페이지네이션(offset·cursor 링크 조립)은
+# `Jsonapi::Pagination`이, keyset 커서의 인코딩·디코딩은 `Jsonapi::Cursor`가
+# 소유한다. 여기 남은 것은 Rails 콜백에 붙는 진입점과 액션별 검증뿐이다.
 module JsonapiQuery
   extend ActiveSupport::Concern
 
@@ -11,37 +15,6 @@ module JsonapiQuery
     before_action :raise_pending_jsonapi_query_shape_conflict
     before_action :validate_jsonapi_action_query!
   end
-
-  DEFAULT_PAGE_SIZE = 20
-  MAX_PAGE_SIZE = 100
-  MAX_SQL_INTEGER = (2**63) - 1
-  MAX_SCORE_INTEGER = (2**31) - 1
-  FILTER_PARAMETER = /\Afilter\[([^\[\]]+)\](?:\[([^\[\]]+)\])?\z/
-  POSITIVE_INTEGER = /\A[0-9]+\z/
-  INTEGER = /\A[+-]?[0-9]+\z/
-  UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
-  DATETIME_WITH_OFFSET = /\A\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})\z/
-
-  FILTER_FIELDS = {
-    "title" => { attribute: :title, type: :string },
-    "status" => { attribute: :status, type: :status },
-    "score" => { attribute: :score, type: :integer },
-    "category.id" => { attribute: :category_id, type: :uuid },
-    "createdAt" => { attribute: :created_at, type: :datetime }
-  }.freeze
-  SORT_FIELDS = {
-    "title" => :title,
-    "status" => :status,
-    "score" => :score,
-    "createdAt" => :created_at,
-    "updatedAt" => :updated_at,
-    "id" => :id
-  }.freeze
-
-  Result = Data.define(:scope, :includes, :total_count, :links, :include_requested)
-  FilterClause = Data.define(:name, :operator, :value)
-  SortTerm = Data.define(:name, :descending)
-  private_constant :FilterClause, :SortTerm
 
   private
 
@@ -51,7 +24,7 @@ module JsonapiQuery
   end
 
   def jsonapi_query(scope)
-    Parser.new(
+    Jsonapi::QueryParser.new(
       scope: scope,
       request: request,
       action_params: -> { params },
@@ -63,7 +36,7 @@ module JsonapiQuery
   def prepare_jsonapi_query_shape_conflict
     return unless respond_to?(:query_contract, true)
 
-    conflict, sanitized_pairs = RawQuery.sanitize_shape_conflicts(RawQuery.decode(request.query_string))
+    conflict, sanitized_pairs = Jsonapi::RawQuery.sanitize_shape_conflicts(Jsonapi::RawQuery.decode(request.query_string))
     return unless conflict
 
     @pending_jsonapi_query_shape_conflict = conflict
@@ -87,10 +60,20 @@ module JsonapiQuery
   def validate_jsonapi_action_query!
     return unless respond_to?(:jsonapi_query_mode, true)
 
-    pairs = RawQuery.decode(request.query_string)
-    return if pairs.empty? || jsonapi_query_mode == :collection
+    mode = jsonapi_query_mode
+    pairs = Jsonapi::RawQuery.decode(request.query_string)
 
-    if jsonapi_query_mode == :include_only
+    # related_collection은 pairs가 비어도(기본 페이지) 돌려야 한다 — render_related_resource가
+    # 쓸 page[number]/page[size] 기본값을 ivar에 남겨야 하기 때문이다. 다른 모드는
+    # 빈 쿼리에서 할 일이 없어 여기서 바로 끝난다.
+    if mode == :related_collection
+      validate_related_collection_query!(pairs)
+      return
+    end
+
+    return if pairs.empty? || mode == :collection
+
+    if mode == :include_only
       validate_include_only_query!(pairs)
       return
     end
@@ -112,15 +95,8 @@ module JsonapiQuery
   def validate_include_only_query!(pairs)
     seen_include = false
     pairs.each do |parameter, value|
-      family = parameter.split("[", 2).first
       unless parameter == "include" && !seen_include
-        code = {
-          "filter" => "INVALID_FILTER",
-          "sort" => "INVALID_SORT",
-          "include" => "INVALID_INCLUDE",
-          "page" => "INVALID_PAGE"
-        }.fetch(family, "INVALID_QUERY_PARAMETER")
-        raise JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
+        raise_jsonapi_family_error!(parameter)
       end
 
       seen_include = true
@@ -133,417 +109,54 @@ module JsonapiQuery
     end
   end
 
-  class RawQuery
-    ERROR_CODE_BY_FAMILY = {
-      "filter" => "INVALID_FILTER",
-      "sort" => "INVALID_SORT",
-      "include" => "INVALID_INCLUDE",
-      "page" => "INVALID_PAGE"
-    }.freeze
-    PARAMETER = /\A([^\[\]]+)((?:\[[^\[\]]*\])*)\z/
-    SEGMENT = /\[([^\[\]]*)\]/
+  # 정본(FastAPI `parse_page_query` / 스펙 8.2)과 같은 계약: to-many related-resource
+  # URL은 page[number]·page[size]만 받는다. page[totals]도 여기서는 거부한다 —
+  # 이 라우트는 총 개수를 항상 내므로 켜고 끌 것이 없다.
+  #
+  # before_action에서 한 번만 파싱해 ivar에 남긴다. render_related_resource가 같은
+  # 쿼리 문자열을 다시 파싱하지 않게 하기 위해서다.
+  def validate_related_collection_query!(pairs)
+    page_number = 1
+    page_size = Jsonapi::Pagination::DEFAULT_PAGE_SIZE
+    seen_page_parameters = []
 
-    class ShapeTree
-      class Node
-        attr_accessor :terminal, :container_kind
-        attr_reader :children
+    pairs.each do |parameter, value|
+      raise_jsonapi_family_error!(parameter) unless %w[page[number] page[size]].include?(parameter)
 
-        def initialize
-          @terminal = false
-          @container_kind = nil
-          @children = {}
-        end
+      if seen_page_parameters.include?(parameter)
+        raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
       end
-      private_constant :Node
+      seen_page_parameters << parameter
 
-      def initialize
-        @root = Node.new
-      end
-
-      def conflict?(segments)
-        node = @root
-        segments.each do |segment|
-          return true if node.terminal
-
-          kind = container_kind(segment)
-          return true if node.container_kind && node.container_kind != kind
-
-          node = node.children[segment]
-          return false unless node
-        end
-
-        !node.container_kind.nil?
-      end
-
-      def add(segments)
-        node = @root
-        segments.each do |segment|
-          node.container_kind ||= container_kind(segment)
-          node = node.children[segment] ||= Node.new
-        end
-        node.terminal = true
-      end
-
-      private
-
-      def container_kind(segment)
-        segment.empty? ? :array : :hash
-      end
-    end
-    private_constant :ShapeTree
-
-    class << self
-      def decode(query_string)
-        return [] if query_string.empty?
-
-        pairs = URI.decode_www_form(query_string, Encoding::UTF_8)
-        raise ArgumentError unless pairs.flatten.all?(&:valid_encoding?)
-
-        pairs
-      end
-
-      def shape_conflict(pairs)
-        sanitize_shape_conflicts(pairs).first
-      end
-
-      def sanitize_shape_conflicts(pairs)
-        conflict = nil
-        shape_trees = {}
-        sanitized_pairs = pairs.reject do |parameter, _|
-          segments = parameter_segments(parameter)
-          next false unless segments
-
-          family = segments.first
-          shape_tree = shape_trees[family] ||= ShapeTree.new
-          if shape_tree.conflict?(segments.drop(1))
-            conflict ||= [ ERROR_CODE_BY_FAMILY.fetch(family, "INVALID_QUERY_PARAMETER"), parameter ]
-            next true
-          end
-
-          shape_tree.add(segments.drop(1))
-          false
-        end
-
-        [ conflict, sanitized_pairs ]
-      end
-
-      private
-
-      def parameter_segments(parameter)
-        match = PARAMETER.match(parameter)
-        return unless match
-
-        [ match[1], *match[2].scan(SEGMENT).flatten ]
-      end
-    end
-  end
-  private_constant :RawQuery
-
-  class Parser
-    def initialize(scope:, request:, action_params:, contract:, model:)
-      @scope = scope
-      @request = request
-      @action_params = action_params
-      @model = model
-      @filter_contract = contract.fetch(:filters).to_h do |name, operators|
-        [ name.to_s, operators.map(&:to_s).freeze ]
-      end.freeze
-      @sort_contract = contract.fetch(:sorts).map(&:to_s).freeze
-      @include_contract = contract.fetch(:includes).map(&:to_s).freeze
-      @parsed_filters = []
-      @seen_filters = Set.new
-      @sort_terms = nil
-      @includes = nil
-      @page_number = 1
-      @page_size = DEFAULT_PAGE_SIZE
-      @seen_page_parameters = Set.new
-    end
-
-    def call
-      @raw_pairs = parse_raw_pairs
-      if (conflict = RawQuery.shape_conflict(@raw_pairs))
-        invalid_query!(*conflict)
-      end
-      @raw_pairs.each { |parameter, value| parse_parameter(parameter, value) }
-      validate_action_controller_parameters!
-      validate_page_offset!
-
-      filtered = apply_filters(@scope)
-      total_count = filtered.unscope(:order).count
-      paginated = apply_pagination(apply_sort(filtered))
-      requested_includes = @includes || []
-      paginated = paginated.includes(*requested_includes.map(&:to_sym)) if requested_includes.any?
-
-      Result.new(
-        scope: paginated,
-        includes: requested_includes,
-        total_count: total_count,
-        links: pagination_links(total_count),
-        include_requested: !@includes.nil?
-      )
-    end
-
-    private
-
-    def parse_raw_pairs
-      RawQuery.decode(@request.query_string)
-    rescue ArgumentError
-      invalid_query!("INVALID_QUERY_PARAMETER", @request.query_string)
-    end
-
-    def parse_parameter(parameter, value)
-      return parse_filter(parameter, value) if parameter.start_with?("filter")
-      return parse_sort(parameter, value) if parameter.start_with?("sort")
-      return parse_include(parameter, value) if parameter.start_with?("include")
-      return parse_page(parameter, value) if parameter.start_with?("page")
-
-      invalid_query!("INVALID_QUERY_PARAMETER", parameter)
-    end
-
-    def parse_filter(parameter, raw_value)
-      match = FILTER_PARAMETER.match(parameter)
-      invalid_query!("INVALID_FILTER", parameter) unless match
-
-      name, requested_operator = match.captures
-      operator = requested_operator || "exact"
-      allowed_operators = @filter_contract[name]
-      unless allowed_operators&.include?(operator) && FILTER_FIELDS.key?(name)
-        invalid_query!("INVALID_FILTER", parameter)
-      end
-
-      key = [ name, operator ]
-      invalid_query!("INVALID_FILTER", parameter) if @seen_filters.include?(key)
-
-      @seen_filters << key
-      @parsed_filters << FilterClause.new(name, operator, parse_filter_value(name, operator, raw_value, parameter))
-    end
-
-    def parse_filter_value(name, operator, raw_value, parameter)
-      invalid_query!("INVALID_FILTER", parameter) if raw_value.empty?
-
-      if operator == "isNull"
-        return true if raw_value == "true"
-        return false if raw_value == "false"
-
-        invalid_query!("INVALID_FILTER", parameter)
-      end
-
-      if operator == "in"
-        values = raw_value.split(",", -1)
-        invalid_query!("INVALID_FILTER", parameter) if values.empty? || values.any?(&:empty?)
-
-        return values.map { |value| parse_scalar(name, value, parameter) }
-      end
-
-      parse_scalar(name, raw_value, parameter)
-    end
-
-    def parse_scalar(name, raw_value, parameter)
-      type = FILTER_FIELDS.fetch(name).fetch(:type)
-
-      case type
-      when :string
-        raw_value
-      when :status
-        parse_status(raw_value, parameter)
-      when :integer
-        parse_integer(raw_value, parameter)
-      when :uuid
-        parse_uuid(raw_value, parameter)
-      when :datetime
-        parse_datetime(raw_value, parameter)
-      else
-        raise ArgumentError, "unsupported JSON:API filter type"
-      end
-    end
-
-    def parse_status(raw_value, parameter)
-      return raw_value if @model.defined_enums.fetch("status", {}).key?(raw_value)
-
-      invalid_query!("INVALID_FILTER", parameter)
-    end
-
-    def parse_integer(raw_value, parameter)
-      invalid_query!("INVALID_FILTER", parameter) unless INTEGER.match?(raw_value)
-
-      value = Integer(raw_value, 10)
-      return value if (-MAX_SCORE_INTEGER - 1..MAX_SCORE_INTEGER).cover?(value)
-
-      invalid_query!("INVALID_FILTER", parameter)
-    rescue ArgumentError
-      invalid_query!("INVALID_FILTER", parameter)
-    end
-
-    def parse_uuid(raw_value, parameter)
-      return raw_value.downcase if UUID.match?(raw_value)
-
-      invalid_query!("INVALID_FILTER", parameter)
-    end
-
-    def parse_datetime(raw_value, parameter)
-      invalid_query!("INVALID_FILTER", parameter) unless DATETIME_WITH_OFFSET.match?(raw_value)
-
-      Time.iso8601(raw_value)
-    rescue ArgumentError
-      invalid_query!("INVALID_FILTER", parameter)
-    end
-
-    def parse_sort(parameter, raw_value)
-      invalid_query!("INVALID_SORT", parameter) unless parameter == "sort" && @sort_terms.nil?
-
-      tokens = raw_value.split(",", -1)
-      invalid_query!("INVALID_SORT", parameter) if tokens.empty? || tokens.any?(&:empty?)
-
-      names = Set.new
-      @sort_terms = tokens.map do |token|
-        descending = token.start_with?("-")
-        name = descending ? token.delete_prefix("-") : token
-        invalid_query!("INVALID_SORT", parameter) unless @sort_contract.include?(name)
-        invalid_query!("INVALID_SORT", parameter) if names.include?(name)
-
-        names << name
-        SortTerm.new(name, descending)
-      end
-    end
-
-    def parse_include(parameter, raw_value)
-      invalid_query!("INVALID_INCLUDE", parameter) unless parameter == "include" && @includes.nil?
-
-      @includes = []
-      return if raw_value.empty?
-
-      tokens = raw_value.split(",", -1)
-      invalid_query!("INVALID_INCLUDE", parameter) if tokens.empty? || tokens.any?(&:empty?)
-
-      tokens.each do |path|
-        invalid_query!("INVALID_INCLUDE", parameter) unless @include_contract.include?(path)
-
-        @includes << path unless @includes.include?(path)
-      end
-    end
-
-    def parse_page(parameter, raw_value)
-      unless %w[page[number] page[size]].include?(parameter) && !@seen_page_parameters.include?(parameter)
-        invalid_query!("INVALID_PAGE", parameter)
-      end
-
-      @seen_page_parameters << parameter
-      value = parse_positive_integer(raw_value, parameter)
+      parsed_value = parse_related_collection_page_integer!(value, parameter)
       if parameter == "page[number]"
-        @page_number = value
+        page_number = parsed_value
       else
-        @page_size = [ value, MAX_PAGE_SIZE ].min
+        page_size = [ parsed_value, Jsonapi::Pagination::MAX_PAGE_SIZE ].min
       end
     end
 
-    def parse_positive_integer(raw_value, parameter)
-      if raw_value.length > MAX_SQL_INTEGER.to_s.length || !POSITIVE_INTEGER.match?(raw_value)
-        invalid_query!("INVALID_PAGE", parameter)
-      end
-
-      value = Integer(raw_value, 10)
-      return value if value.between?(1, MAX_SQL_INTEGER)
-
-      invalid_query!("INVALID_PAGE", parameter)
-    rescue ArgumentError
-      invalid_query!("INVALID_PAGE", parameter)
+    if (page_number - 1) * page_size > Jsonapi::Pagination::MAX_SQL_INTEGER
+      raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: "page[number]" })
     end
 
-    def validate_page_offset!
-      return if (@page_number - 1) * @page_size <= MAX_SQL_INTEGER
-
-      invalid_query!("INVALID_PAGE", "page[number]")
-    end
-
-    def validate_action_controller_parameters!
-      families = @raw_pairs.map(&:first)
-      validate_parameter_family!(families, "filter", ActionController::Parameters, "INVALID_FILTER")
-      validate_parameter_family!(families, "page", ActionController::Parameters, "INVALID_PAGE")
-      validate_parameter_family!(families, "sort", String, "INVALID_SORT")
-      validate_parameter_family!(families, "include", String, "INVALID_INCLUDE")
-    end
-
-    def validate_parameter_family!(parameters, family, expected_class, code)
-      return unless parameters.any? { |parameter| parameter == family || parameter.start_with?("#{family}[") }
-      return if @action_params.call[family].is_a?(expected_class)
-
-      invalid_query!(code, family)
-    end
-
-    def apply_filters(scope)
-      @parsed_filters.reduce(scope) do |relation, filter|
-        definition = FILTER_FIELDS.fetch(filter.name)
-        column = @model.arel_table[definition.fetch(:attribute)]
-        predicate = filter_predicate(column, filter)
-        relation.where(predicate)
-      end
-    end
-
-    def filter_predicate(column, filter)
-      case filter.operator
-      when "exact"
-        column.eq(filter.value)
-      when "contains"
-        pattern = "%#{ActiveRecord::Base.sanitize_sql_like(filter.value)}%"
-        column.matches(pattern, "\\", true)
-      when "gt"
-        column.gt(filter.value)
-      when "gte"
-        column.gteq(filter.value)
-      when "lt"
-        column.lt(filter.value)
-      when "lte"
-        column.lteq(filter.value)
-      when "in"
-        column.in(filter.value)
-      when "isNull"
-        filter.value ? column.eq(nil) : column.not_eq(nil)
-      else
-        raise ArgumentError, "unsupported JSON:API filter operator"
-      end
-    end
-
-    def apply_sort(scope)
-      terms = @sort_terms || [ SortTerm.new("createdAt", true) ]
-      terms = [ *terms, SortTerm.new("id", false) ] unless terms.any? { |term| term.name == "id" }
-      order = terms.map do |term|
-        column = @model.arel_table[SORT_FIELDS.fetch(term.name)]
-        term.descending ? column.desc : column.asc
-      end
-
-      scope.reorder(*order)
-    end
-
-    def apply_pagination(scope)
-      scope.offset((@page_number - 1) * @page_size).limit(@page_size)
-    end
-
-    def pagination_links(total_count)
-      last_page = [ 1, (total_count + @page_size - 1) / @page_size ].max
-      {
-        "self" => page_link(@page_number),
-        "first" => page_link(1),
-        "prev" => @page_number > 1 ? page_link(@page_number - 1) : nil,
-        "next" => @page_number < last_page ? page_link(@page_number + 1) : nil,
-        "last" => page_link(last_page)
-      }
-    end
-
-    def page_link(number)
-      preserved = @raw_pairs.reject { |parameter, _| parameter == "page" || parameter.start_with?("page[") }
-      query = URI.encode_www_form(
-        [ *preserved, [ "page[number]", number.to_s ], [ "page[size]", @page_size.to_s ] ]
-      )
-      "#{@request.path}?#{query}"
-    end
-
-    def invalid_query!(code, parameter)
-      raise JsonApiError.new(
-        status: 400,
-        code: code,
-        source: { parameter: parameter }
-      )
-    end
+    @related_collection_page_number = page_number
+    @related_collection_page_size = page_size
   end
-  private_constant :Parser
+
+  def parse_related_collection_page_integer!(raw_value, parameter)
+    value = Jsonapi::Pagination.parse_positive_integer(raw_value)
+    return value if value
+
+    raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
+  end
+
+  # `validate_include_only_query!`와 `validate_related_collection_query!`가 같이 쓰는
+  # 파라미터 패밀리 → 에러 코드 매핑. `Jsonapi::RawQuery`가 형태 충돌 판정에 쓰는 것과
+  # 같은 매핑이라 여기서 새로 정의하지 않고 그대로 재사용한다.
+  def raise_jsonapi_family_error!(parameter)
+    family = parameter.split("[", 2).first
+    code = Jsonapi::RawQuery::ERROR_CODE_BY_FAMILY.fetch(family, "INVALID_QUERY_PARAMETER")
+    raise JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
+  end
 end

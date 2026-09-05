@@ -193,18 +193,6 @@ GEM
     jsonapi.rb (2.1.1)
       jsonapi-serializer
       rack
-    kaminari (1.2.2)
-      activesupport (>= 4.1.0)
-      kaminari-actionview (= 1.2.2)
-      kaminari-activerecord (= 1.2.2)
-      kaminari-core (= 1.2.2)
-    kaminari-actionview (1.2.2)
-      actionview
-      kaminari-core (= 1.2.2)
-    kaminari-activerecord (1.2.2)
-      activerecord
-      kaminari-core (= 1.2.2)
-    kaminari-core (1.2.2)
     language_server-protocol (3.17.0.3)
     logger (1.7.0)
     lograge (0.14.0)
@@ -498,7 +486,6 @@ DEPENDENCIES
   jbuilder
   jsonapi-serializer
   jsonapi.rb
-  kaminari
   lograge
   ostruct
   pg

@@ -128,6 +128,20 @@ RSpec.configure do |config|
         "/api/v1/examples/{id}/tags" => {
           parameters: [ id_parameter ],
           get: operation.call("Tag related resources 조회", "TagCollectionDocument")
+        },
+        "/api/v1/categories" => {
+          get: operation.call("Category 목록 조회", "ExampleCategoryCollectionDocument")
+        },
+        "/api/v1/categories/{id}" => {
+          parameters: [ id_parameter ],
+          get: operation.call("Category 조회", "ExampleCategoryDocument")
+        },
+        "/api/v1/tags" => {
+          get: operation.call("Tag 목록 조회", "ExampleTagCollectionDocument")
+        },
+        "/api/v1/tags/{id}" => {
+          parameters: [ id_parameter ],
+          get: operation.call("Tag 조회", "ExampleTagDocument")
         }
       },
       components: {
@@ -184,13 +198,14 @@ RSpec.configure do |config|
               { "$ref" => "#/components/schemas/ExampleCategoryIdentifier" },
               {
                 type: "object",
-                required: [ "attributes" ],
+                required: %w[attributes links],
                 properties: {
                   attributes: {
                     type: "object",
                     required: [ "name" ],
                     properties: { name: { type: "string" } }
-                  }
+                  },
+                  links: { type: "object" }
                 }
               }
             ]
@@ -200,13 +215,14 @@ RSpec.configure do |config|
               { "$ref" => "#/components/schemas/ExampleTagIdentifier" },
               {
                 type: "object",
-                required: [ "attributes" ],
+                required: %w[attributes links],
                 properties: {
                   attributes: {
                     type: "object",
                     required: [ "name" ],
                     properties: { name: { type: "string" } }
-                  }
+                  },
+                  links: { type: "object" }
                 }
               }
             ]
@@ -347,7 +363,7 @@ RSpec.configure do |config|
           },
           ExampleCollectionDocument: {
             type: "object",
-            required: %w[data meta links],
+            required: %w[data links],
             properties: {
               data: {
                 type: "array",
@@ -404,12 +420,64 @@ RSpec.configure do |config|
           },
           TagCollectionDocument: {
             type: "object",
-            required: [ "data" ],
+            required: %w[data links],
             properties: {
               data: {
                 type: "array",
                 items: { "$ref" => "#/components/schemas/ExampleTagResource" }
-              }
+              },
+              meta: {
+                type: "object",
+                required: [ "totalCount" ],
+                properties: { totalCount: { type: "integer", minimum: 0 } }
+              },
+              links: { type: "object" }
+            }
+          },
+          ExampleCategoryDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: { "$ref" => "#/components/schemas/ExampleCategoryResource" }
+            }
+          },
+          ExampleCategoryCollectionDocument: {
+            type: "object",
+            required: %w[data links],
+            properties: {
+              data: {
+                type: "array",
+                items: { "$ref" => "#/components/schemas/ExampleCategoryResource" }
+              },
+              meta: {
+                type: "object",
+                required: [ "totalCount" ],
+                properties: { totalCount: { type: "integer", minimum: 0 } }
+              },
+              links: { type: "object" }
+            }
+          },
+          ExampleTagDocument: {
+            type: "object",
+            required: [ "data" ],
+            properties: {
+              data: { "$ref" => "#/components/schemas/ExampleTagResource" }
+            }
+          },
+          ExampleTagCollectionDocument: {
+            type: "object",
+            required: %w[data links],
+            properties: {
+              data: {
+                type: "array",
+                items: { "$ref" => "#/components/schemas/ExampleTagResource" }
+              },
+              meta: {
+                type: "object",
+                required: [ "totalCount" ],
+                properties: { totalCount: { type: "integer", minimum: 0 } }
+              },
+              links: { type: "object" }
             }
           }
         }
