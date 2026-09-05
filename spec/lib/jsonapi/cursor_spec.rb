@@ -7,31 +7,84 @@ RSpec.describe Jsonapi::Cursor do
     it "round-trips values under a matching signature" do
       encoded = described_class.encode("createdAt:desc,id:asc", %w[2026-01-01T00:00:00Z abc])
 
-      expect(described_class.decode(encoded, "createdAt:desc,id:asc")).to eq(%w[2026-01-01T00:00:00Z abc])
+      expect(described_class.decode(encoded, "createdAt:desc,id:asc", "page[after]")).to eq(
+        %w[2026-01-01T00:00:00Z abc]
+      )
     end
 
     it "rejects a cursor encoded under a different signature" do
       encoded = described_class.encode("createdAt:desc,id:asc", %w[x y])
 
-      expect { described_class.decode(encoded, "title:asc,id:asc") }
+      expect { described_class.decode(encoded, "title:asc,id:asc", "page[after]") }
         .to raise_error(JsonApiError) { |error| expect(error.code).to eq("INVALID_PAGE") }
     end
 
     it "rejects a value list whose length does not match the signature" do
       encoded = described_class.encode("createdAt:desc,id:asc", %w[x])
 
-      expect { described_class.decode(encoded, "createdAt:desc,id:asc") }
+      expect { described_class.decode(encoded, "createdAt:desc,id:asc", "page[after]") }
         .to raise_error(JsonApiError)
     end
 
     it "rejects a string that is not base64url" do
-      expect { described_class.decode("not base64!!", "id:asc") }.to raise_error(JsonApiError)
+      expect { described_class.decode("not base64!!", "id:asc", "page[after]") }.to raise_error(JsonApiError)
     end
 
     it "rejects a payload that is not JSON" do
       encoded = Base64.urlsafe_encode64("not json", padding: false)
 
-      expect { described_class.decode(encoded, "id:asc") }.to raise_error(JsonApiError)
+      expect { described_class.decode(encoded, "id:asc", "page[after]") }.to raise_error(JsonApiError)
+    end
+
+    it "rejects a cursor longer than the maximum length without decoding it" do
+      # 정본의 4096자 상한과 맞춘다 — base64+JSON 디코딩 비용을 들이기 전에 자른다.
+      oversized = "a" * (described_class::MAX_CURSOR_LENGTH + 1)
+
+      expect { described_class.decode(oversized, "id:asc", "page[after]") }
+        .to raise_error(JsonApiError) { |error| expect(error.code).to eq("INVALID_PAGE") }
+    end
+
+    it "reports the parameter passed in, not a hardcoded one, in the error source" do
+      # source.parameter는 응답 문서의 필드다 — page[before]로 디코딩을 시도했으면
+      # 오류도 page[before]를 가리켜야 한다.
+      expect { described_class.decode("not base64!!", "id:asc", "page[before]") }
+        .to raise_error(JsonApiError) { |error| expect(error.source).to eq(parameter: "page[before]") }
+    end
+  end
+
+  describe ".encodable?" do
+    it "accepts every whitelisted type" do
+      accepted = [ "text", 42, true, false, nil, Time.zone.now, DateTime.now, Date.today ]
+
+      aggregate_failures do
+        accepted.each do |value|
+          expect(described_class.encodable?(value)).to be(true), "expected #{value.class} to be encodable"
+        end
+      end
+    end
+
+    it "rejects a type outside the whitelist" do
+      # BigDecimal처럼 나중에 정렬 컬럼으로 열릴 수 있는 타입 — 화이트리스트 밖이면
+      # 왕복 가능 여부를 판정하는 이 게이트가 실제로 막아야 한다(지금은 어떤 공개
+      # 정렬도 이 타입이 아니라서 요청 스펙으로는 닿지 않는다).
+      require "bigdecimal"
+      expect(described_class.encodable?(BigDecimal("1.5"))).to be(false)
+    end
+  end
+
+  describe ".serialize" do
+    it "formats every admitted type on its own arm" do
+      aggregate_failures do
+        expect(described_class.serialize(Time.utc(2026, 1, 2, 3, 4, 5, 600_000)))
+          .to eq("2026-01-02T03:04:05.600000Z")
+        expect(described_class.serialize(DateTime.new(2026, 1, 2, 3, 4, 5)))
+          .to eq("2026-01-02T03:04:05.000000Z")
+        expect(described_class.serialize(Date.new(2026, 1, 2))).to eq("2026-01-02")
+        expect(described_class.serialize(true)).to eq("true")
+        expect(described_class.serialize(false)).to eq("false")
+        expect(described_class.serialize(42)).to eq("42")
+        expect(described_class.serialize("already-a-string")).to eq("already-a-string")
+      end
     end
   end
 

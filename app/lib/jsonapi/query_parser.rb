@@ -434,7 +434,7 @@ module Jsonapi
       scope = filtered
 
       unless @cursor_raw.empty?
-        values = Cursor.decode(@cursor_raw, Cursor.signature(terms))
+        values = Cursor.decode(@cursor_raw, Cursor.signature(terms), cursor_parameter)
         scope = scope.where(
           Cursor.keyset_predicate(@model.arel_table, terms, attributes, values, before: @cursor_before)
         )

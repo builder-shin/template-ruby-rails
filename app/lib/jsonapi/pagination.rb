@@ -64,8 +64,13 @@ module Jsonapi
       emit_next = before ? positioned : has_more
       emit_prev = before ? has_more : positioned
 
-      previous_cursor = records.empty? ? nil : boundary_cursor(signature, terms, attributes, records.first)
-      following_cursor = records.empty? ? nil : boundary_cursor(signature, terms, attributes, records.last)
+      # "prev"는 언제나 page[before]로, "next"는 언제나 page[after]로 나간다(요청의
+      # 방향과 무관하다) — 왕복 불가 값이라 커서를 못 만들 때 그 링크의 파라미터
+      # 이름을 그대로 오류에 싣는다.
+      previous_cursor =
+        records.empty? ? nil : boundary_cursor(signature, terms, attributes, records.first, "page[before]")
+      following_cursor =
+        records.empty? ? nil : boundary_cursor(signature, terms, attributes, records.last, "page[after]")
 
       {
         "self" => cursor_link(request, preserved, page_size, totals,
@@ -80,10 +85,10 @@ module Jsonapi
       }
     end
 
-    def boundary_cursor(signature, terms, attributes, record)
+    def boundary_cursor(signature, terms, attributes, record, parameter)
       values = terms.map do |term|
         value = record.public_send(attributes.fetch(term.name))
-        raise Cursor.invalid_cursor unless Cursor.encodable?(value)
+        raise Cursor.invalid_cursor(parameter) unless Cursor.encodable?(value)
 
         Cursor.serialize(value)
       end

@@ -680,6 +680,29 @@ RSpec.describe "Example JSON:API pagination contract", type: :request do
     expect(seen).to eq(expected)
   end
 
+  it "walks the whole collection backwards from page[before]=" do
+    # 위 테스트는 page[after]=(컬렉션의 시작)에서 next를 따라 앞으로 간다. 이
+    # 테스트는 page[before]=(컬렉션의 끝)에서 prev를 따라 뒤로 간다 — positioned된
+    # page[before] keyset 술어(strict_comparison의 before: 분기, reversed_order)를
+    # 실제 행으로 지나가는 유일한 자리다. 각 페이지는 이미 표시 순서라서 앞쪽에
+    # 이어붙여야 전체가 정방향 순서로 복원된다.
+    create_list(:example, 5)
+
+    seen = []
+    url = "/api/v1/examples?page[size]=2&page[before]="
+    while url
+      get url, headers: jsonapi_headers
+      expect(response).to have_http_status(:ok)
+      document = JSON.parse(response.body)
+      seen = document.fetch("data").map { |resource| resource.fetch("id") } + seen
+      url = document.fetch("links").fetch("prev")
+    end
+
+    get "/api/v1/examples?page[size]=100", headers: jsonapi_headers
+    expected = JSON.parse(response.body).fetch("data").map { |resource| resource.fetch("id") }
+    expect(seen).to eq(expected)
+  end
+
   it "walks the whole collection by cursor under a mixed-direction multi-key sort" do
     # 선두 정렬 컬럼(status, 오름차순)에 값이 반복되고 둘째 컬럼(score, 내림차순)이
     # 방향을 뒤집는다 — keyset 술어에 붙인 선두 경계(leading bound)의 부등호가
@@ -739,7 +762,20 @@ RSpec.describe "Example JSON:API pagination contract", type: :request do
     get "/api/v1/examples?page[after]=not-base64url!!", headers: jsonapi_headers
 
     expect(response).to have_http_status(:bad_request)
-    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("INVALID_PAGE")
+    document = JSON.parse(response.body)
+    expect(document.dig("errors", 0, "code")).to eq("INVALID_PAGE")
+    expect(document.dig("errors", 0, "source", "parameter")).to eq("page[after]")
+  end
+
+  it "reports page[before], not a hardcoded page[after], when a page[before] cursor is malformed" do
+    # source.parameter는 응답 문서의 필드다 — 구현 세부사항이 아니다. 하드코딩돼
+    # 있으면 page[before]로 보낸 요청의 오류도 page[after]라고 잘못 보고한다.
+    get "/api/v1/examples?page[before]=not-base64url!!", headers: jsonapi_headers
+
+    expect(response).to have_http_status(:bad_request)
+    document = JSON.parse(response.body)
+    expect(document.dig("errors", 0, "code")).to eq("INVALID_PAGE")
+    expect(document.dig("errors", 0, "source", "parameter")).to eq("page[before]")
   end
 
   it "has a null prev link on the first cursor page" do
@@ -806,9 +842,12 @@ RSpec.describe "Example JSON:API pagination contract", type: :request do
   end
 
   it "supports page[totals]=true in cursor mode across every link" do
+    # sort=score를 같이 보낸다 — preserved 파라미터가 없으면 *preserved를
+    # *totals_pair 뒤로 옮기는 뮤테이션이 이 테스트를 안 깨뜨린다(둘 다 비어
+    # 있으면 순서가 안 보인다).
     create_list(:example, 5)
 
-    get "/api/v1/examples?page[after]=&page[totals]=true&page[size]=2", headers: jsonapi_headers
+    get "/api/v1/examples?sort=score&page[after]=&page[totals]=true&page[size]=2", headers: jsonapi_headers
     expect(response).to have_http_status(:ok)
     expect(JSON.parse(response.body).fetch("meta")).to eq("totalCount" => 5)
     first_next = JSON.parse(response.body).fetch("links").fetch("next")
@@ -823,7 +862,12 @@ RSpec.describe "Example JSON:API pagination contract", type: :request do
     links = second_page.fetch("links")
     expect(links.keys).to eq(%w[self first prev next last])
     links.each_value do |link|
-      expect(decoded_link_query(link)).to include("page[totals]" => "true")
+      expect(decoded_link_query(link)).to include("page[totals]" => "true", "sort" => "score")
     end
+
+    # decoded_link_query는 Hash로 모으므로 순서에는 눈이 멀다 — 여기서는 와이어 그대로의
+    # 키 순서(preserved → page[totals] → 커서 파라미터 → page[size])를 정본과 맞춰 고정한다.
+    expect(URI.decode_www_form(URI.parse(links.fetch("next")).query).map(&:first))
+      .to eq(%w[sort page[totals] page[after] page[size]])
   end
 end

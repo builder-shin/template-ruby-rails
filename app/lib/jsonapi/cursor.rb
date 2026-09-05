@@ -10,6 +10,10 @@ module Jsonapi
   # 방향을 이어붙인 문자열)을 함께 담아, 정렬이 달라진 커서를 되돌려받으면
   # 거부한다 — 그러지 않으면 클라이언트가 다른 정렬의 위치로 페이지를 자른다.
   module Cursor
+    # 정본의 4096(query.py:413)과 맞춘다. base64+JSON 디코딩 비용을 들이기 전에
+    # 자르는 것이 목적이라 실제 커서 길이(정렬 term 몇 개의 값)보다 넉넉히 크다.
+    MAX_CURSOR_LENGTH = 4096
+
     module_function
 
     def signature(terms)
@@ -20,18 +24,20 @@ module Jsonapi
       Base64.urlsafe_encode64(JSON.generate({ "s" => signature, "v" => values }), padding: false)
     end
 
-    def decode(raw, expected_signature)
+    def decode(raw, expected_signature, parameter)
+      raise invalid_cursor(parameter) if raw.length > MAX_CURSOR_LENGTH
+
       payload = JSON.parse(Base64.urlsafe_decode64(raw))
-      raise invalid_cursor unless payload.is_a?(Hash)
-      raise invalid_cursor unless payload["s"] == expected_signature
+      raise invalid_cursor(parameter) unless payload.is_a?(Hash)
+      raise invalid_cursor(parameter) unless payload["s"] == expected_signature
 
       values = payload["v"]
-      raise invalid_cursor unless values.is_a?(Array)
-      raise invalid_cursor unless values.length == expected_signature.split(",").length
+      raise invalid_cursor(parameter) unless values.is_a?(Array)
+      raise invalid_cursor(parameter) unless values.length == expected_signature.split(",").length
 
       values
     rescue ArgumentError, JSON::ParserError
-      raise invalid_cursor
+      raise invalid_cursor(parameter)
     end
 
     # 커서 값을 문자열로 왕복시킬 수 있는지 본다. 왕복시킬 수 없는 타입이 정렬에
@@ -96,8 +102,12 @@ module Jsonapi
       descending ? column.lt(value) : column.gt(value)
     end
 
-    def invalid_cursor
-      JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: "page[after]" })
+    # `parameter`는 이 오류가 어느 요청 파라미터에 관한 것인지를 응답의
+    # `errors[0].source.parameter`에 그대로 싣는다 — 정본이 `decode_cursor(...,
+    # parameter)`로 스레딩하는 것과 같다. 하드코딩하면 `page[before]`로 보낸
+    # 요청의 오류도 `page[after]`라고 잘못 보고하게 된다.
+    def invalid_cursor(parameter)
+      JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: parameter })
     end
   end
 end
