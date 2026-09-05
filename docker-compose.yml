@@ -43,6 +43,9 @@ services:
       DEV_DATABASE_PASSWORD: postgres
       DEV_DATABASE_NAME: template_development
       AUTH_SERVICE_URL: http://auth-stub:8080
+      # JWT_SECRET_KEY는 코드에 기본값이 없다(config/initializers/auth.rb) — 로컬
+      # compose 스택이 뜨려면 여기서 명시해야 한다. 운영 값이 아니다.
+      JWT_SECRET_KEY: docker-compose-dev-only-jwt-secret-key-do-not-use-in-production
       ACTIVE_STORAGE_SERVICE: local
       ACTIVE_JOB_QUEUE_ADAPTER: sidekiq
       SKIP_TEST_DATABASE: "1"

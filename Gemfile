@@ -23,9 +23,6 @@ gem "jbuilder"
 # Use Kredis to get higher-level data types in Redis [https://github.com/rails/kredis]
 # gem "kredis"
 
-# Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
-gem "bcrypt", "~> 3.1.7"
-
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem "tzinfo-data"
 
@@ -84,6 +81,8 @@ gem "actioncable"
 # 검색 및 필터링 기능을 위한 Gem
 gem "ransack"
 # 인증(로그인/회원가입/ETC)을 위한 Gem
+gem "argon2", "~> 2.3"
+gem "jwt", "~> 3.2"
 # HTTP 클라이언트 (외부 API 호출용)
 gem "faraday", "~> 2.0"
 gem "faraday-retry"
