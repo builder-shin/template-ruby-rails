@@ -96,6 +96,30 @@ RSpec.describe "Example CRUD", type: :request do
     expect(persisted.tag_ids).to contain_exactly(*tags.map(&:id))
   end
 
+  # 쓰기 경로(CrudActions#render_jsonapi_payload → JSON.generate)와 읽기 경로
+  # (render jsonapi: → ActiveSupport 인코더)가 같은 자원의 같은 필드를 서로 다른
+  # 형식으로 내던 결함의 가드. 실측(고치기 전): POST가
+  # "2026-09-05 23:59:49 +0900"(Time#to_s — Time.iso8601이 ArgumentError를 낸다),
+  # GET이 "2026-09-05T23:59:49.418+09:00". `Time.iso8601` 파싱 성공만 단언하면
+  # 밀리초 정밀도 차이를 못 잡으므로 **문자열이 정확히 같은지**를 본다.
+  it "renders createdAt/updatedAt on the write path exactly as the read path does" do
+    perform_jsonapi(:post, collection_path, document(attributes: { title: "Timestamps" }))
+
+    expect(response).to have_http_status(:created)
+    written = parsed_body.dig("data", "attributes")
+    id = parsed_body.dig("data", "id")
+
+    get resource_path(id), headers: jsonapi_headers
+
+    expect(response).to have_http_status(:ok)
+    read = parsed_body.dig("data", "attributes")
+    aggregate_failures do
+      expect(written.fetch("createdAt")).to eq(read.fetch("createdAt"))
+      expect(written.fetch("updatedAt")).to eq(read.fetch("updatedAt"))
+      expect { Time.iso8601(written.fetch("createdAt")) }.not_to raise_error
+    end
+  end
+
   it "rejects unknown attributes instead of silently discarding them" do
     perform_jsonapi(
       :post,

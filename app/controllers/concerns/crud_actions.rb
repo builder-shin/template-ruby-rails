@@ -455,11 +455,20 @@ module CrudActions
     payload.dig(:data, :links, :self) || payload.dig("data", "links", "self")
   end
 
+  # `payload.as_json`을 먼저 거치는 것이 핵심이다. `JSON.generate`는 Ruby의
+  # 순수 JSON 인코더라 Time/ActiveSupport::TimeWithZone을 만나면 `to_s`를 불러
+  # "2026-09-05 23:59:49 +0900"을 낸다 — ISO-8601이 아니라 Time.iso8601이
+  # 파싱조차 못 하는 형식이다. 읽기 경로(`render jsonapi:`)는 ActiveSupport
+  # 인코더를 타서 "2026-09-05T23:59:49.418+09:00"을 내므로, 이 단계가 없으면
+  # **같은 자원이 동사에 따라 다른 시간 형식으로 나간다**(POST /examples의
+  # createdAt vs GET /examples/:id의 createdAt). `as_json`은 그 ActiveSupport
+  # 인코더와 정확히 같은 변환(`Time#as_json` → `xmlschema(time_precision)`,
+  # 기본 정밀도 3)이라 두 경로가 바이트 단위로 같아진다.
   def render_jsonapi_payload(payload, status:, location: nil)
     response.status = Rack::Utils.status_code(status)
     response.headers["Content-Type"] = JSONAPI::MEDIA_TYPE
     response.headers["Location"] = location if location
-    self.response_body = JSON.generate(payload)
+    self.response_body = JSON.generate(payload.as_json)
   end
 
   # Convert nested include hash to ActiveRecord format
