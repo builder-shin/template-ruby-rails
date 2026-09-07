@@ -87,7 +87,19 @@ Rails.application.configure do
   config.web_console.allowed_ips = "0.0.0.0/0"
 
   # Enable DNS rebinding protection and other `Host` header attacks.
-  config.hosts = [
-    "localhost:#{ENV.fetch("PORT", 4000)}"
-  ]
+  #
+  # 기본은 오늘과 동일하게 "localhost:PORT" 하나뿐이다. ALLOWED_HOSTS를 주면(형식은
+  # production과 동일 — 쉼표로 구분한 host:port 목록) 그 목록으로 완전히 대체된다.
+  # 컨테이너 네트워크에서 서비스명 호스트(예: api:4000)로 불릴 때 Host 헤더가
+  # localhost가 아니라서 막히던 Blocked Host를 이렇게 풀 수 있다.
+  #
+  # 빈 문자열은 "설정 안 함"으로 취급한다(ENV["ALLOWED_HOSTS"].presence). .env.example을
+  # 그대로 복사해 ALLOWED_HOSTS=를 빈 채로 둔 기존 로컬 흐름이 config.hosts = []
+  # (host 검사 자체가 꺼짐)로 조용히 바뀌면 안 되기 때문이다.
+  config.hosts =
+    if (allowed_hosts = ENV["ALLOWED_HOSTS"].presence)
+      allowed_hosts.split(",")
+    else
+      [ "localhost:#{ENV.fetch("PORT", 4000)}" ]
+    end
 end

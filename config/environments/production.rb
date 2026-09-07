@@ -49,7 +49,19 @@ Rails.application.configure do
   config.assume_ssl = true
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  config.force_ssl = true
+  #
+  # 기본은 켜짐이다 — 운영에서 실수로 꺼지면 그 자체로 보안 결함이므로, 끄는 쪽만
+  # 화이트리스트로 인식한다. RAILS_FORCE_SSL을 "false" 또는 "0"(대소문자 무관)으로
+  # 명시했을 때만 꺼지고, 그 외 값이나 미설정은 전부 켜짐이다 — 오타나 빈 문자열로
+  # 꺼지는 사고를 막는다.
+  #
+  # 참고: 바로 위 assume_ssl = true 때문에 이 값이 켜져 있어도 평문 HTTP 요청이
+  # https로 리다이렉트되지는 않는다 — request.ssl?를 항상 true로 취급해서 force_ssl의
+  # 리다이렉트 분기 자체를 안 탄다(컨테이너 내부망에서 직접 실측 확인). 다만
+  # Strict-Transport-Security 헤더는 이 값에만 달려 있으므로, TLS가 없는 환경(E2E 등)
+  # 에서 그 헤더를 보내고 싶지 않을 때 여기서 명시적으로 끌 수 있게 열어 둔다.
+  force_ssl_explicitly_disabled = %w[false 0].include?(ENV["RAILS_FORCE_SSL"].to_s.strip.downcase)
+  config.force_ssl = !force_ssl_explicitly_disabled
 
   # Skip http-to-https redirect for health check endpoints (used by Railway internal health checks).
   config.ssl_options = { redirect: { exclude: ->(request) { request.path.start_with?("/health") } } }
