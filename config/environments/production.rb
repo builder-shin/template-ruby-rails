@@ -105,7 +105,17 @@ Rails.application.configure do
   config.active_record.dump_schema_after_migration = false
 
   # Enable DNS rebinding protection and other `Host` header attacks.
-  config.hosts = ENV.fetch("ALLOWED_HOSTS", "localhost").split(",")
+  #
+  # 기본은 오늘과 동일하게 ["localhost"]다. 빈 문자열은 "설정 안 함"으로 취급한다
+  # (.presence) — ENV.fetch만 쓰면 ALLOWED_HOSTS=(빈 값)일 때 "".split(",")가 []가
+  # 되어 host 검사가 통째로 꺼진다. 운영에서 조용히 열리는 채로 아무 흔적도 안 남는
+  # 보안 구멍이라, development.rb와 같은 모양의 가드를 여기도 넣는다.
+  config.hosts =
+    if (allowed_hosts = ENV["ALLOWED_HOSTS"].presence)
+      allowed_hosts.split(",")
+    else
+      [ "localhost" ]
+    end
   # Skip DNS rebinding protection for the default health check endpoint.
   config.host_authorization = { exclude: ->(request) { request.path.start_with?("/health") } }
 end
