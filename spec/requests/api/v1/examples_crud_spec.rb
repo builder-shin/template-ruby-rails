@@ -120,6 +120,73 @@ RSpec.describe "Example CRUD", type: :request do
     end
   end
 
+  # 선언 밖 enum 값은 500 이 아니라 422 다.
+  #
+  # 고치기 전: 모델의 enum 대입이 ArgumentError 를 냈고 그것이
+  # rescue_from StandardError 에 걸려 500 이 됐다. 클라이언트는 어느 입력 아래에
+  # 오류를 붙일지 알 수 없었고, 사용자 입력 오류가 서버 오류율로 잡혔다.
+  #
+  # 프로브 값은 실전 어휘(draft·active·archived)와 겹치지 않게 고정한다.
+  describe "선언 밖 enum 값" do
+    let(:undeclared_status) { "probe-lab-undeclared" }
+
+    it "생성에서 422 와 status 포인터를 낸다" do
+      perform_jsonapi(
+        :post,
+        collection_path,
+        document(attributes: { title: "probe-lab enum", status: undeclared_status, score: 0 })
+      )
+
+      expect_error(:unprocessable_content, "VALIDATION_ERROR", pointer: "/data/attributes/status")
+    end
+
+    it "수정에서 422 와 status 포인터를 낸다" do
+      example = create(:example, status: "draft")
+
+      perform_jsonapi(
+        :patch,
+        resource_path(example),
+        document(attributes: { status: undeclared_status }, id: example.id)
+      )
+
+      expect_error(:unprocessable_content, "VALIDATION_ERROR", pointer: "/data/attributes/status")
+    end
+
+    it "교체(PUT)에서 422 와 status 포인터를 낸다" do
+      example = create(:example, status: "draft")
+
+      perform_jsonapi(
+        :put,
+        resource_path(example),
+        document(attributes: { title: "probe-lab enum", status: undeclared_status, score: 0 }, id: example.id)
+      )
+
+      expect_error(:unprocessable_content, "VALIDATION_ERROR", pointer: "/data/attributes/status")
+    end
+
+    # 422 로 바뀌어도 "행이 만들어지지 않는다" 는 명제는 그대로여야 한다 -
+    # 거부의 모양만 고친 것이지 거부 자체를 무르는 변경이 아니다.
+    it "행을 만들지 않고 기존 값도 바꾸지 않는다" do
+      example = create(:example, status: "draft")
+
+      expect {
+        perform_jsonapi(
+          :post,
+          collection_path,
+          document(attributes: { title: "probe-lab enum", status: undeclared_status, score: 0 })
+        )
+      }.not_to change(Example, :count)
+
+      perform_jsonapi(
+        :patch,
+        resource_path(example),
+        document(attributes: { status: undeclared_status }, id: example.id)
+      )
+
+      expect(example.reload.status).to eq("draft")
+    end
+  end
+
   it "rejects unknown attributes instead of silently discarding them" do
     perform_jsonapi(
       :post,

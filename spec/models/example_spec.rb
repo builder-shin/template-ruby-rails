@@ -34,9 +34,14 @@ RSpec.describe Example, type: :model do
       end
     end
 
-    it "rejects an unsupported status" do
-      expect { example.status = "pending" }
-        .to raise_error(ArgumentError, /pending/)
+    # 선언 밖 값은 **대입에서 raise 하지 않고 검증에서** 잡힌다.
+    # 대입이 ArgumentError 를 내면 컨트롤러에서 500 이 되기 때문이다
+    # (app/models/example.rb 의 validate: true 주석 참고).
+    it "rejects an unsupported status at validation, not at assignment" do
+      expect { example.status = "probe-lab-undeclared" }.not_to raise_error
+
+      expect(example).not_to be_valid
+      expect(example.errors.attribute_names).to include(:status)
     end
 
     it "allows scores at both boundaries" do
