@@ -40,6 +40,78 @@ RSpec.describe "Example relationships", type: :request do
     URI.decode_www_form(URI.parse(link).query).to_h
   end
 
+  # 응답 문서에서 태그 순서가 세 자리 모두 태그 id 오름차순이다 -
+  # data.relationships, included, 그리고 관련 자원 라우트.
+  #
+  # 모델 스펙(spec/models/example_relationships_spec.rb)이 연관 자체의 순서를
+  # 지키고, 여기는 **문서로 나가는 순서**를 지킨다. 직렬화기가 정렬을 다시
+  # 잃어버릴 수 있는 자리라 따로 잰다.
+  #
+  # 픽스처의 id 순서와 이름 순서를 일부러 뒤집는다 - 둘이 같으면 정렬 키를
+  # 바꿔치기한 뮤턴트가 안 죽는다.
+  describe "태그 순서" do
+    let!(:first_by_id) do
+      create(:example_tag, id: "44440000-0000-4000-8000-000000000001", name: "probe-order 003 alpha")
+    end
+    let!(:second_by_id) do
+      create(:example_tag, id: "44440000-0000-4000-8000-000000000002", name: "probe-order 001 bravo")
+    end
+
+    let(:expected_ids) { [ first_by_id.id, second_by_id.id ] }
+
+    # 붙이는 순서를 id 순서의 **역**으로 준다. 백엔드가 붙인 순서를 그대로
+    # 되돌리면 여기서 죽는다.
+    def create_example_with_reversed_tags
+      post(
+        collection_path,
+        params: {
+          data: {
+            type: "examples",
+            attributes: { title: "probe-order 문서", status: "draft", score: 0 },
+            relationships: {
+              tags: { data: [ identifier("exampleTags", second_by_id), identifier("exampleTags", first_by_id) ] }
+            }
+          }
+        }.to_json,
+        headers: jsonapi_headers.merge(auth_bearer_headers)
+      )
+      expect(response).to have_http_status(:created)
+      parsed_body.dig("data", "id")
+    end
+
+    it "상세 문서의 relationships 와 included 가 모두 id 오름차순이다" do
+      id = create_example_with_reversed_tags
+
+      get "#{collection_path}/#{id}?include=tags", headers: jsonapi_headers
+
+      expect(response).to have_http_status(:ok)
+      expect(parsed_body.dig("data", "relationships", "tags", "data").pluck("id")).to eq(expected_ids)
+      included_tags = parsed_body.fetch("included").select { |resource| resource["type"] == "exampleTags" }
+      expect(included_tags.pluck("id")).to eq(expected_ids)
+    end
+
+    it "목록 문서도 같은 순서를 낸다" do
+      create_example_with_reversed_tags
+
+      get "#{collection_path}?include=tags", headers: jsonapi_headers
+
+      expect(response).to have_http_status(:ok)
+      tagged = parsed_body.fetch("data").find { |resource| resource.dig("relationships", "tags", "data").present? }
+      expect(tagged.dig("relationships", "tags", "data").pluck("id")).to eq(expected_ids)
+    end
+
+    it "관계 라우트와 관련 자원 라우트도 같은 순서를 낸다" do
+      id = create_example_with_reversed_tags
+      example = Example.find(id)
+
+      get relationship_path(example, "tags"), headers: jsonapi_headers
+      expect(parsed_body.fetch("data").pluck("id")).to eq(expected_ids)
+
+      get related_path(example, "tags"), headers: jsonapi_headers
+      expect(parsed_body.fetch("data").pluck("id")).to eq(expected_ids)
+    end
+  end
+
   it "replaces, reads, and clears the category relationship" do
     example = create(:example)
     category = create(:example_category, name: "분류")
