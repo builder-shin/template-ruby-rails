@@ -1,4 +1,5 @@
 require "active_support/core_ext/integer/time"
+require_relative "../health_check_host_authorization"
 
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
@@ -116,6 +117,7 @@ Rails.application.configure do
     else
       [ "localhost" ]
     end
-  # Skip DNS rebinding protection for the default health check endpoint.
-  config.host_authorization = { exclude: ->(request) { request.path.start_with?("/health") } }
+  # 컨테이너 헬스체크는 Host 검사에서 제외한다. 술어는 development 와 공유한다
+  # (config/health_check_host_authorization.rb) — 한쪽만 고쳐지는 드리프트를 막는다.
+  config.host_authorization = { exclude: HealthCheckHostAuthorization::EXCLUDE }
 end

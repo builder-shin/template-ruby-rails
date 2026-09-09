@@ -1,4 +1,5 @@
 require "active_support/core_ext/integer/time"
+require_relative "../health_check_host_authorization"
 
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
@@ -102,4 +103,11 @@ Rails.application.configure do
     else
       [ "localhost:#{ENV.fetch("PORT", 4000)}" ]
     end
+
+  # 컨테이너 헬스체크는 Host 검사에서 제외한다 — production 과 같은 술어를 쓴다.
+  #
+  # 이것이 없으면 development 스테이지 컨테이너의 HEALTHCHECK 가 localhost 를
+  # 겨눌 때 ALLOWED_HOSTS 와 무관하게 403 Blocked hosts 로 항상 막히고,
+  # `docker compose up --wait` 가 스택 전체를 실패로 처리한다.
+  config.host_authorization = { exclude: HealthCheckHostAuthorization::EXCLUDE }
 end
