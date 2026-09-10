@@ -60,3 +60,10 @@ node_modules/
 .omc
 .worktrees/
 .superpowers/
+
+# Keep agent documentation alongside ignored runtime data.
+!/log/AGENTS.md
+!/storage/AGENTS.md
+!/tmp/AGENTS.md
+!/tmp/pids/AGENTS.md
+!/tmp/storage/AGENTS.md
