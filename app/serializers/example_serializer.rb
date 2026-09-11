@@ -8,7 +8,8 @@ class ExampleSerializer < ApplicationSerializer
   set_type :examples
   set_id { |example| example.id.to_s.downcase }
 
-  attributes :title, :description, :status, :score, :created_at, :updated_at
+  attributes :title, :description, :status, :score
+  utc_microsecond_timestamps :created_at, :updated_at
 
   link :self do |example|
     "/api/v1/examples/#{example.id.to_s.downcase}"

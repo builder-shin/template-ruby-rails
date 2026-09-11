@@ -29,6 +29,6 @@ class Example < ApplicationRecord
   #    같은 관계를 어느 라우트로 묻느냐에 따라 순서가 달라진다.
   has_many :tags, -> { order(:id) }, through: :example_taggings, source: :example_tag
 
-  validates :title, presence: true, length: { maximum: 200 }
+  validates :title, length: { minimum: 1, maximum: 200 }, exclusion: { in: [ nil ] }
   validates :score, numericality: { only_integer: true, in: 0..100 }
 end

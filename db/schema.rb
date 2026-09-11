@@ -10,9 +10,13 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_05_000000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_11_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  # Custom types defined in this database.
+  # Note that some types may not work with other database engines. Be careful if changing database.
+  create_enum "example_status", ["draft", "active", "archived"]
 
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
@@ -42,9 +46,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_000000) do
     t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
   end
 
+  create_table "email_identity_backups", primary_key: "user_id", id: :uuid, default: nil, force: :cascade do |t|
+    t.string "canonical_email", limit: 254, null: false
+    t.string "original_email", limit: 254, null: false
+  end
+
   create_table "example_categories", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.string "name", null: false
+    t.string "name", limit: 200, null: false
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_example_categories_on_name", unique: true
   end
@@ -52,11 +61,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_000000) do
   create_table "example_taggings", primary_key: ["example_id", "tag_id"], force: :cascade do |t|
     t.uuid "example_id", null: false
     t.uuid "tag_id", null: false
+    t.index ["tag_id"], name: "index_example_taggings_on_tag_id"
   end
 
   create_table "example_tags", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.string "name", null: false
+    t.string "name", limit: 200, null: false
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_example_tags_on_name", unique: true
   end
@@ -65,13 +75,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_000000) do
     t.uuid "category_id"
     t.datetime "created_at", null: false
     t.text "description"
-    t.integer "score", default: 0, null: false
-    t.string "status", default: "draft", null: false
+    t.integer "score", null: false
+    t.enum "status", null: false, enum_type: "example_status"
     t.string "title", limit: 200, null: false
     t.datetime "updated_at", null: false
     t.index ["category_id"], name: "index_examples_on_category_id"
+    t.index ["created_at", "id"], name: "index_examples_on_created_at_and_id", order: { created_at: :desc }
+    t.index ["title", "id"], name: "index_examples_on_title_and_id"
     t.check_constraint "score >= 0 AND score <= 100", name: "examples_score_check"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'active'::character varying::text, 'archived'::character varying::text])", name: "examples_status_check"
   end
 
   create_table "refresh_sessions", id: :uuid, default: nil, force: :cascade do |t|

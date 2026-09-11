@@ -1,6 +1,7 @@
 Rails.application.routes.draw do
   mount Rswag::Ui::Engine => "/api-docs"
   mount Rswag::Api::Engine => "/api-docs"
+  get "/api/schema", to: "api_docs#schema"
 
   get "/health/live", to: "health#live"
   get "/health/ready", to: "health#ready"
@@ -45,6 +46,33 @@ Rails.application.routes.draw do
       resources :categories, only: %i[index show], controller: "example_categories"
       resources :tags, only: %i[index show], controller: "example_tags"
     end
+  end
+
+
+  # Rails routes an unmatched verb to the catch-all below as if the path were
+  # missing. Keep known public paths ahead of that catch-all so method mismatch
+  # has the same 405 HTTP_ERROR contract as the canonical backend.
+  [
+    "/health/live",
+    "/health/ready",
+    "/api/schema",
+    "/api/v1/auth/register",
+    "/api/v1/auth/login",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/logout",
+    "/api/v1/examples",
+    "/api/v1/examples/:id",
+    "/api/v1/examples/:id/relationships/category",
+    "/api/v1/examples/:id/category",
+    "/api/v1/examples/:id/relationships/tags",
+    "/api/v1/examples/:id/tags",
+    "/api/v1/users/me",
+    "/api/v1/categories",
+    "/api/v1/categories/:id",
+    "/api/v1/tags",
+    "/api/v1/tags/:id"
+  ].each do |known_path|
+    match known_path, to: "application#method_not_allowed", via: :all
   end
 
   match "/api/*unmatched", to: "application#route_not_found", via: :all

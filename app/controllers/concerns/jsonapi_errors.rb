@@ -29,8 +29,16 @@ module JsonapiErrors
   private
 
   def render_jsonapi_error(error)
-    object = jsonapi_error_object(error)
-    render_jsonapi_errors([ object ], status: object.fetch(:status).to_i)
+    objects = if error.sources.any?
+      error.sources.map do |source|
+        jsonapi_error_object(
+          JsonApiError.new(status: error.status, code: error.code, source: source, context: error.context)
+        )
+      end
+    else
+      [ jsonapi_error_object(error) ]
+    end
+    render_jsonapi_errors(objects, status: objects.first.fetch(:status).to_i)
   end
 
   def render_invalid_jsonapi_document(_error)
@@ -70,7 +78,7 @@ module JsonapiErrors
     append_vary_header("Accept-Language")
     response.status = status
     response.headers["Content-Type"] = JSONAPI_MEDIA_TYPE
-    self.response_body = JSON.generate(errors: errors)
+    self.response_body = JSON.generate(errors: errors, jsonapi: { version: "1.1" })
   end
 
   def jsonapi_error_object(error)

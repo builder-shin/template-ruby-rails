@@ -49,7 +49,10 @@ module JsonapiAuthentication
     # 아님"과 "sub가 UUID이지만 그런 사용자가 없음"이 여기서는 같은 nil로 저절로
     # 합쳐져 별도 사전 검사가 필요 없다 — 정본이 UUID(claims.sub) 파싱 실패를
     # ValueError로 잡아 INVALID_TOKEN으로 보내는 것과 최종 결과가 같다.
-    User.find_by(id: claims.sub) || raise(invalid_token_error)
+    identifier = Auth::Tokens.uuid_claim(claims.sub)
+    raise invalid_token_error unless identifier
+
+    User.find_by(id: identifier) || raise(invalid_token_error)
   end
 
   # Authorization 헤더에서 Bearer 자격증명을 꺼낸다. 스킴은 대소문자를 가리지
@@ -61,7 +64,7 @@ module JsonapiAuthentication
     scheme, _separator, credential = header.partition(" ")
     raise invalid_token_error if scheme.empty? || credential.empty? || !scheme.casecmp?("bearer")
 
-    credential
+    credential.strip
   end
 
   def decode_bearer_access_token(token)

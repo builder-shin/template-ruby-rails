@@ -357,10 +357,10 @@ RSpec.describe Auth::Tokens do
   # 없으면 두 메서드 중 하나의 동작이 바뀌어도(예: nil을 numeric 취급하도록 고치는
   # 실수) 아무도 못 잡는다.
   describe "decode → TokenExpired → decode_expired_refresh composition (Task 3's rotation depends on this)" do
-    it "decode reports TokenExpired for exp: null, and decode_expired_refresh on the same token still rejects it as InvalidToken" do
+    it "decode reports InvalidToken for exp: null, and decode_expired_refresh on the same token still rejects it as InvalidToken" do
       token = raw_token(valid_payload("type" => "refresh", "exp" => nil))
 
-      expect { described_class.decode(token, expected_type: "refresh") }.to raise_error(Auth::Tokens::TokenExpired)
+      expect { described_class.decode(token, expected_type: "refresh") }.to raise_error(Auth::Tokens::InvalidToken)
       expect { described_class.decode_expired_refresh(token) }.to raise_error(Auth::Tokens::InvalidToken)
     end
   end

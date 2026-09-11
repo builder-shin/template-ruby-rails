@@ -83,6 +83,8 @@ gem "ransack"
 # 인증(로그인/회원가입/ETC)을 위한 Gem
 gem "argon2", "~> 2.3"
 gem "jwt", "~> 3.2"
+# Unicode IDNA conversion for the shared email identity contract.
+gem "simpleidn", "0.2.3"
 # HTTP 클라이언트 (외부 API 호출용)
 gem "faraday", "~> 2.0"
 gem "faraday-retry"

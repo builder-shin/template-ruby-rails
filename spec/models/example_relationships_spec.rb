@@ -95,6 +95,11 @@ RSpec.describe "Example relationships", type: :model do
     expect(build(:example_category, name: " ")).not_to be_valid
   end
 
+  it "rejects category and tag names longer than 200 characters" do
+    expect(build(:example_category, name: "c" * 201)).not_to be_valid
+    expect(build(:example_tag, name: "t" * 201)).not_to be_valid
+  end
+
   it "rejects duplicate tag names" do
     tag = create(:example_tag)
     duplicate = build(:example_tag, name: tag.name)

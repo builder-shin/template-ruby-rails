@@ -110,14 +110,14 @@ RSpec.describe "Reference resources", type: :request do
     # 본문을 붙이면(예: params: "{}") 라우팅이 실패하기도 전에 JsonapiNegotiation의
     # 문서 형태 검증이 먼저 걸려 400 INVALID_JSONAPI_DOCUMENT가 나온다 — "쓰기
     # 라우트가 없다"가 아니라 "문서가 잘못됐다"를 재는 셈이 되어 이 테스트의
-    # 취지와 어긋난다. 본문 없이 보내야 catch-all의 404 RESOURCE_NOT_FOUND를 잰다.
+    # 취지와 어긋난다. 본문 없이 보내야 알려진 경로의 405 HTTP_ERROR를 잰다.
     post "/api/v1/categories", headers: jsonapi_headers
-    expect(response).to have_http_status(:not_found)
-    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("RESOURCE_NOT_FOUND")
+    expect(response).to have_http_status(:method_not_allowed)
+    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("HTTP_ERROR")
 
     delete "/api/v1/tags/#{ExampleTag.first.id}", headers: jsonapi_headers
-    expect(response).to have_http_status(:not_found)
-    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("RESOURCE_NOT_FOUND")
+    expect(response).to have_http_status(:method_not_allowed)
+    expect(JSON.parse(response.body).dig("errors", 0, "code")).to eq("HTTP_ERROR")
   end
 
   def get_json(path)

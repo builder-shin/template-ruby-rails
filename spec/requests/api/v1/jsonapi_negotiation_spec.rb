@@ -21,13 +21,13 @@ RSpec.describe "JSON:API media type negotiation", type: :request do
     Rails.application.reload_routes!
   end
 
-  def expect_error(status:, code:, parameter: nil)
+  def expect_error(status:, code:, header: nil)
     error = parsed_body.fetch("errors").first
 
     expect(response).to have_http_status(status)
     expect(response.headers.fetch("Content-Type")).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
     expect(error).to include("status" => status.to_s, "code" => code)
-    expect(error.fetch("source")).to eq("parameter" => parameter) if parameter
+    expect(error.fetch("source")).to eq("header" => header) if header
   end
 
   it "accepts compatible ranges and valid quoted profile URI lists" do
@@ -49,16 +49,12 @@ RSpec.describe "JSON:API media type negotiation", type: :request do
     end
   end
 
-  it "rejects unsupported, malformed, or unquoted JSON:API Accept parameters" do
+  it "rejects unsupported or malformed JSON:API Accept parameters" do
     incompatible_accepts = [
       "application/json",
       "application/vnd.api+json;charset=utf-8",
       'application/vnd.api+json;ext="https://jsonapi.org/ext/version"',
       'application/vnd.api+json;ext="https://jsonapi.org/ext/version", */*;q=1',
-      "application/vnd.api+json;profile=example",
-      'application/vnd.api+json;profile=""',
-      'application/vnd.api+json;profile="/relative"',
-      'application/vnd.api+json;profile="not-a-uri"',
       "application/vnd.api+json;q=0",
       "application/vnd.api+json;q=invalid",
       'application/vnd.api+json;q="0.7"',
@@ -70,7 +66,7 @@ RSpec.describe "JSON:API media type negotiation", type: :request do
     incompatible_accepts.each do |accept|
       get probe_path, headers: { "ACCEPT" => accept }
 
-      expect_error(status: 406, code: "NOT_ACCEPTABLE", parameter: "Accept")
+      expect_error(status: 406, code: "NOT_ACCEPTABLE", header: "Accept")
     end
   end
 
@@ -86,12 +82,14 @@ RSpec.describe "JSON:API media type negotiation", type: :request do
     expect(response).to have_http_status(:no_content)
   end
 
-  it "requires Content-Type only for write requests with at least one raw body byte" do
-    %i[post put patch delete].each do |method|
+  it "requires Content-Type on body-taking actions even when no body is sent" do
+    %i[post put patch].each do |method|
       public_send(method, probe_path, headers: { "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE })
-
-      expect(response).to have_http_status(:no_content)
+      expect_error(status: 415, code: "UNSUPPORTED_MEDIA_TYPE", header: "Content-Type")
     end
+
+    delete probe_path, headers: { "ACCEPT" => JsonapiRequestHelper::JSONAPI_MEDIA_TYPE }
+    expect(response).to have_http_status(:no_content)
 
     post probe_path,
          params: " \t",
@@ -100,12 +98,16 @@ RSpec.describe "JSON:API media type negotiation", type: :request do
            "CONTENT_TYPE" => "application/json"
          }
 
-    expect_error(status: 415, code: "UNSUPPORTED_MEDIA_TYPE", parameter: "Content-Type")
+    expect_error(status: 415, code: "UNSUPPORTED_MEDIA_TYPE", header: "Content-Type")
   end
 
-  it "accepts exact JSON:API Content-Type and valid quoted profiles" do
+  it "accepts exact JSON:API Content-Type and syntactically valid profiles" do
     compatible_content_types = [
       "application/vnd.api+json",
+      "application/vnd.api+json;profile=example",
+      'application/vnd.api+json;profile=""',
+      'application/vnd.api+json;profile="/relative"',
+      'application/vnd.api+json;profile="not-a-uri"',
       'application/vnd.api+json;profile="https://example.com/profile"',
       ' Application/Vnd.Api+Json ; profile="https://example.com/one urn:example:two" '
     ]
@@ -122,15 +124,11 @@ RSpec.describe "JSON:API media type negotiation", type: :request do
     end
   end
 
-  it "rejects unsupported ext and malformed or unquoted Content-Type parameters" do
+  it "rejects unsupported ext and malformed Content-Type parameters" do
     incompatible_content_types = [
       "application/json",
       "application/vnd.api+json;charset=utf-8",
-      'application/vnd.api+json;ext="https://jsonapi.org/ext/version"',
-      "application/vnd.api+json;profile=example",
-      'application/vnd.api+json;profile=""',
-      'application/vnd.api+json;profile="/relative"',
-      'application/vnd.api+json;profile="not-a-uri"'
+      'application/vnd.api+json;ext="https://jsonapi.org/ext/version"'
     ]
 
     incompatible_content_types.each do |content_type|
@@ -141,32 +139,33 @@ RSpec.describe "JSON:API media type negotiation", type: :request do
              "CONTENT_TYPE" => content_type
            }
 
-      expect_error(status: 415, code: "UNSUPPORTED_MEDIA_TYPE", parameter: "Content-Type")
+      expect_error(status: 415, code: "UNSUPPORTED_MEDIA_TYPE", header: "Content-Type")
     end
   end
 
-  it "maps a whitespace JSON:API body to INVALID_JSONAPI_DOCUMENT" do
+  it "maps a whitespace JSON:API body to VALIDATION_ERROR" do
     post probe_path,
          params: " \t",
          headers: jsonapi_headers
 
-    expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+    expect_error(status: 422, code: "VALIDATION_ERROR")
   end
 
-  it "maps malformed JSON to INVALID_JSONAPI_DOCUMENT" do
+  it "maps malformed JSON to VALIDATION_ERROR" do
     post probe_path,
          params: '{"data":',
          headers: jsonapi_headers
 
-    expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+    expect_error(status: 422, code: "VALIDATION_ERROR")
   end
 
-  it "rejects a JSON:API request document without data" do
+
+
+  it "leaves document member validation to the action schema" do
     post probe_path,
          params: { meta: { requestId: "safe" } }.to_json,
          headers: jsonapi_headers
 
-    expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
-    expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data")
+    expect(response).to have_http_status(:no_content)
   end
 end

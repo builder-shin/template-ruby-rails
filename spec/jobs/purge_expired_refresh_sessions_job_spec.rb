@@ -336,7 +336,7 @@ RSpec.describe PurgeExpiredRefreshSessionsJob do
     # 정본·NestJS 모두 여기서 끊는다. `batch_size` 가 0이면 `deleted < batch_size` 가
     # `0 < 0` 으로 영원히 거짓이라 매 배치가 아무것도 지우지 못한 채 상한까지 빈 왕복을
     # 돌며 워커 슬롯을 붙잡는다.
-    [ 0, -1, 1.5, nil, "10" ].each do |bad_batch_size|
+    [ 0, -1, 1.5, nil, "10", true, false, Float::INFINITY, Float::NAN, 2**53 ].each do |bad_batch_size|
       it "returns zero without touching the database for #{bad_batch_size.inspect}" do
         purgeable(2.days)
         allow(Rails.logger).to receive(:warn)
@@ -359,6 +359,28 @@ RSpec.describe PurgeExpiredRefreshSessionsJob do
         expect(statements).to be_empty
         expect(Rails.logger).to have_received(:warn).with(/batch_size must be a positive integer/)
         expect(RefreshSession.count).to eq(1)
+      end
+    end
+
+    it "accepts an integral numeric batch size and reports committed batches" do
+      2.times { purgeable(2.days) }
+
+      result = described_class.perform_now(1.0)
+
+      expect(result.deleted).to eq(2)
+      expect(result.batches).to eq(3)
+      expect(RefreshSession.count).to eq(0)
+    end
+
+    [ 2**31, (2**53) - 1 ].each do |large_batch_size|
+      it "binds safe integer batch size #{large_batch_size} without narrowing it to int32" do
+        purgeable(2.days)
+
+        result = described_class.perform_now(large_batch_size)
+
+        expect(result.deleted).to eq(1)
+        expect(result.batches).to eq(1)
+        expect(RefreshSession.count).to eq(0)
       end
     end
   end
@@ -420,9 +442,7 @@ RSpec.describe PurgeExpiredRefreshSessionsJob do
 
   describe "job wiring" do
     it "maps the reference actor's retry policy onto Sidekiq" do
-      # 정본: `@dramatiq.actor(max_retries=3, min_backoff=15_000)`.
-      # Sidekiq 의 backoff 는 `job_retry.rb` 의 `(count**4) + 15` + jitter 라 최솟값이
-      # 정확히 15초다. 남는 것은 재시도 횟수이고 그것이 이 옵션이다.
+      # Actual retry deadlines are exercised in shared_retry_schedule_spec.rb.
       expect(described_class.get_sidekiq_options["retry"]).to eq(3)
       expect(described_class.queue_name).to eq("default")
     end

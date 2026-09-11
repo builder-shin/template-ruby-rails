@@ -8,7 +8,8 @@ class UserSerializer < ApplicationSerializer
   set_type :users
   set_id { |user| user.id.to_s.downcase }
 
-  attributes :email, :is_active, :created_at, :updated_at
+  attributes :email, :is_active
+  utc_microsecond_timestamps :created_at, :updated_at
 
   link :self do |_user|
     "/api/v1/users/me"

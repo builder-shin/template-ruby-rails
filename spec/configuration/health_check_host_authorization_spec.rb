@@ -35,6 +35,7 @@ RSpec.describe HealthCheckHostAuthorization do
     Rails.application.routes.routes
          .map { |route| route.path.spec.to_s.sub(/\(\.:format\)\z/, "") }
          .select { |path| path.start_with?(described_class::PATH_PREFIX) }
+         .uniq
   end
 
   it "헬스 경로를 라우터에서 실제로 찾는다" do

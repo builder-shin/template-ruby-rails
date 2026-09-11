@@ -137,6 +137,14 @@ module JsonapiRelationships
   end
 
   def relationship_linkage!(policy)
+    document = raw_write_document
+    errors = if document.is_a?(Hash)
+      (document.key?("data") ? linkage_validation_errors(document["data"], policy, "/data") : [ "/data" ]) +
+        document.keys.reject { |key| key == "data" }.map { |key| "/#{pointer_segment(key)}" }
+    else
+      [ nil ]
+    end
+    raise_write_validation_errors!(errors)
     unless params.key?(:data)
       raise_invalid_relationship_document("/data")
     end
@@ -154,16 +162,13 @@ module JsonapiRelationships
     return nil if linkage.nil?
 
     identifiers = policy.fetch(:cardinality) == :many ? linkage : [ linkage ]
+    seen_ids = {}
     normalized_ids = identifiers.each_with_index.map do |identifier, index|
       pointer = policy.fetch(:cardinality) == :many ? "#{pointer_prefix}/#{index}" : pointer_prefix
-      normalize_relationship_identifier!(policy, identifier, pointer)
-    end
-    seen_ids = {}
-    normalized_ids.each_with_index do |identifier, index|
-      next seen_ids[identifier] = true unless seen_ids.key?(identifier)
-
-      pointer = policy.fetch(:cardinality) == :many ? "#{pointer_prefix}/#{index}/id" : "#{pointer_prefix}/id"
-      raise_invalid_relationship_document(pointer)
+      normalized_id = normalize_relationship_identifier!(policy, identifier, pointer)
+      raise_invalid_relationship_document("#{pointer}/id") if seen_ids.key?(normalized_id)
+      seen_ids[normalized_id] = true
+      normalized_id
     end
     found = policy.fetch(:model).where(id: normalized_ids).index_by { |record| record.id.to_s.downcase }
     resources = normalized_ids.each_with_index.map do |identifier, index|
@@ -184,8 +189,14 @@ module JsonapiRelationships
   def normalize_relationship_identifier!(policy, identifier, pointer)
     raise_invalid_relationship_document(pointer) unless identifier.is_a?(ActionController::Parameters)
 
-    unsupported = identifier.keys.map(&:to_s).find { |member| !%w[type id].include?(member) }
-    raise_invalid_relationship_document("#{pointer}/#{unsupported}") if unsupported
+    unsupported = identifier.keys.map(&:to_s).find { |member| !%w[type id meta].include?(member) }
+    if unsupported
+      raise JsonApiError.new(
+        status: 422,
+        code: "VALIDATION_ERROR",
+        source: { pointer: "#{pointer}/#{unsupported}" }
+      )
+    end
     missing = %w[type id].find { |member| !identifier.key?(member) }
     raise_invalid_relationship_document("#{pointer}/#{missing}") if missing
 
@@ -199,7 +210,9 @@ module JsonapiRelationships
 
     value = identifier[:id].to_s
     begin
-      normalized_resource_id(value)
+      # Embedded writes later deserialize these same parameters into association
+      # IDs. Keep the canonical value that was validated and resolved here.
+      identifier[:id] = normalized_resource_id(value)
     rescue JsonApiError
       raise JsonApiError.new(
         status: 404,

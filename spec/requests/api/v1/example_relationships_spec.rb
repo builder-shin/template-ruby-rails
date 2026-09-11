@@ -8,6 +8,41 @@ RSpec.describe "Example relationships", type: :request do
 
   before { mock_bearer_user }
 
+  [ false, true ].each do |embedded|
+    it "reports an earlier normalized duplicate before a later type mismatch (embedded=#{embedded})" do
+      example = create(:example)
+      tag = create(:example_tag)
+      data = [
+        { type: "exampleTags", id: tag.id },
+        { type: "exampleTags", id: tag.id.delete("-") },
+        { type: "wrong", id: tag.id }
+      ]
+      document = embedded ? { data: { type: "examples", id: example.id, relationships: { tags: { data: data } } } } : { data: data }
+      path = embedded ? "/api/v1/examples/#{example.id}" : "/api/v1/examples/#{example.id}/relationships/tags"
+
+      patch path, params: document.to_json, headers: jsonapi_headers.merge(auth_bearer_headers)
+
+      prefix = embedded ? "/data/relationships/tags/data" : "/data"
+      expect_error(:bad_request, "INVALID_JSONAPI_DOCUMENT", pointer: "#{prefix}/1/id")
+      expect(example.reload.tags).to be_empty
+    end
+  end
+
+  it "rejects an extra relationship-linkage member with a 422 source pointer" do
+    example = create(:example)
+    tag = create(:example_tag)
+
+    patch "/api/v1/examples/#{example.id}/relationships/tags",
+          params: { data: [ { type: "exampleTags", id: tag.id, extra: true } ] }.to_json,
+          headers: jsonapi_headers.merge(auth_bearer_headers)
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(parsed_body.fetch("errors").first).to include(
+      "code" => "VALIDATION_ERROR",
+      "source" => { "pointer" => "/data/0/extra" }
+    )
+  end
+
   def relationship_path(example, name)
     "#{collection_path}/#{example.id}/relationships/#{name}"
   end
@@ -125,10 +160,11 @@ RSpec.describe "Example relationships", type: :request do
     get path, headers: jsonapi_headers
 
     expect(response).to have_http_status(:ok)
-    expect(parsed_body).to eq(
-      "data" => { "type" => "exampleCategories", "id" => category.id },
-      "links" => { "self" => path, "related" => related_path(example, "category") }
-    )
+      expect(parsed_body).to eq(
+        "data" => { "type" => "exampleCategories", "id" => category.id },
+        "links" => { "self" => path, "related" => related_path(example, "category") },
+        "jsonapi" => { "version" => "1.1" }
+      )
 
     get related_path(example, "category"), headers: jsonapi_headers
 
@@ -152,10 +188,11 @@ RSpec.describe "Example relationships", type: :request do
     get path, headers: jsonapi_headers
 
     expect(response).to have_http_status(:ok)
-    expect(parsed_body).to eq(
-      "data" => nil,
-      "links" => { "self" => path, "related" => related_path(example, "category") }
-    )
+      expect(parsed_body).to eq(
+        "data" => nil,
+        "links" => { "self" => path, "related" => related_path(example, "category") },
+        "jsonapi" => { "version" => "1.1" }
+      )
   end
 
   it "rejects a category linkage with the wrong type" do
@@ -213,10 +250,11 @@ RSpec.describe "Example relationships", type: :request do
     get path, headers: jsonapi_headers
 
     expect(response).to have_http_status(:ok)
-    expect(parsed_body).to eq(
-      "data" => [ { "type" => "exampleTags", "id" => third.id } ],
-      "links" => { "self" => path, "related" => related_path(example, "tags") }
-    )
+      expect(parsed_body).to eq(
+        "data" => [ { "type" => "exampleTags", "id" => third.id } ],
+        "links" => { "self" => path, "related" => related_path(example, "tags") },
+        "jsonapi" => { "version" => "1.1" }
+      )
 
     get related_path(example, "tags"), headers: jsonapi_headers
 

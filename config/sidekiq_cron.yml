@@ -1,22 +1,11 @@
-# Sidekiq-cron 스케줄 정의. config/initializers/sidekiq.rb 가 서버 부팅 시 로드합니다.
-#
-# ⚠️ 이 파일의 오타는 부팅을 멈추지 않습니다. sidekiq-cron 2.3.1의 검증
-# (`job.rb:467` `klass_valid`)은 `class:` 가 "비어 있지 않은 문자열"인지만 보고
-# 상수가 실재하는지는 보지 않으며, `load_from_hash!` 는 오류를 예외로 올리지 않고
-# Hash 로 **반환만** 합니다 — 초기화자는 그 반환값을 버립니다. 그래서 잘못된 항목은
-# 조용히 등록되거나(존재하지 않는 class) 조용히 누락되어(깨진 cron) 정리 작업이
-# 아무 신호 없이 영영 돌지 않습니다.
-#
-# → spec/configuration/sidekiq_cron_schedule_spec.rb 가 이 파일의 모든 항목에 대해
-#   class 상수 resolve 와 cron 파싱을 검사합니다. 항목을 추가할 때 그 스펙이
-#   자동으로 함께 검사하므로 별도로 할 일은 없습니다.
+# Sidekiq-cron reads this file when the worker starts.
+# No automatic jobs are scheduled by default; enqueue from an external scheduler
+# or replace {} with the example below to opt in to hourly refresh-session cleanup.
+# An empty schedule also removes registrations loaded from an earlier version.
+# Invalid job classes and schedule errors fail worker startup.
+{}
 
-purge_expired_refresh_sessions:
-  # 정본(FastAPI)의 README가 문서화한 것과 같은 매시 정각. 보존 기간(기본 7일)이 긴
-  # 만큼 행은 꾸준히 쌓이므로, 하루 한 번 몰아 지우는 것보다 매시 조금씩 지우는 쪽이
-  # 배치당 잠금 범위와 cascade 경합을 작게 유지합니다. 매시 정각이라 타임존 선택이
-  # 동작에 영향을 주지 않지만, 해석이 프로세스 로컬 시간에 좌우되지 않도록 명시합니다.
-  cron: "0 * * * * UTC"
-  class: "PurgeExpiredRefreshSessionsJob"
-  queue: "default"
-  description: "보존 기간을 넘긴 만료 refresh 세션을 오래된 순서로 배치 삭제"
+# purge_expired_refresh_sessions:
+#   cron: "0 * * * * UTC"
+#   class: "PurgeExpiredRefreshSessionsJob"
+#   queue: "default"

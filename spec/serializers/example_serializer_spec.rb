@@ -105,6 +105,24 @@ RSpec.describe ExampleSerializer do
     end
   end
 
+  describe "public timestamps" do
+    let(:options) { { is_collection: false } }
+    let(:example) do
+      build(
+        :example,
+        created_at: Time.utc(2026, 1, 1).change(usec: 0),
+        updated_at: Time.utc(2026, 1, 1).change(usec: 123_456)
+      )
+    end
+
+    it "uses UTC offsets and emits microseconds only when they are nonzero" do
+      attributes = document.dig("data", "attributes")
+
+      expect(attributes.fetch("createdAt")).to eq("2026-01-01T00:00:00+00:00")
+      expect(attributes.fetch("updatedAt")).to eq("2026-01-01T00:00:00.123456+00:00")
+    end
+  end
+
   describe "included resources" do
     let(:options) { { include: %i[category tags] } }
 

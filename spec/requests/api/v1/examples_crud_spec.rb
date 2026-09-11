@@ -96,6 +96,30 @@ RSpec.describe "Example CRUD", type: :request do
     expect(persisted.tag_ids).to contain_exactly(*tags.map(&:id))
   end
 
+  it "requires status and score when creating an Example" do
+    [
+      [ { title: "Missing status", score: 0 }, "/data/attributes/status" ],
+      [ { title: "Missing score", status: "draft" }, "/data/attributes/score" ]
+    ].each do |attributes, pointer|
+      perform_jsonapi(:post, collection_path, document(attributes: attributes))
+
+      expect_error(:unprocessable_content, "VALIDATION_ERROR", pointer: pointer)
+    end
+    expect(Example.count).to eq(0)
+  end
+
+  it "reports every missing required create attribute" do
+    perform_jsonapi(:post, collection_path, document(attributes: { title: "Incomplete" }))
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(parsed_body.fetch("errors").pluck("source")).to eq(
+      [
+        { "pointer" => "/data/attributes/status" },
+        { "pointer" => "/data/attributes/score" }
+      ]
+    )
+  end
+
   # 쓰기 경로(CrudActions#render_jsonapi_payload → JSON.generate)와 읽기 경로
   # (render jsonapi: → ActiveSupport 인코더)가 같은 자원의 같은 필드를 서로 다른
   # 형식으로 내던 결함의 가드. 실측(고치기 전): POST가
@@ -103,7 +127,11 @@ RSpec.describe "Example CRUD", type: :request do
   # GET이 "2026-09-05T23:59:49.418+09:00". `Time.iso8601` 파싱 성공만 단언하면
   # 밀리초 정밀도 차이를 못 잡으므로 **문자열이 정확히 같은지**를 본다.
   it "renders createdAt/updatedAt on the write path exactly as the read path does" do
-    perform_jsonapi(:post, collection_path, document(attributes: { title: "Timestamps" }))
+    perform_jsonapi(
+      :post,
+      collection_path,
+      document(attributes: { title: "Timestamps", status: "draft", score: 0 })
+    )
 
     expect(response).to have_http_status(:created)
     written = parsed_body.dig("data", "attributes")
@@ -116,8 +144,17 @@ RSpec.describe "Example CRUD", type: :request do
     aggregate_failures do
       expect(written.fetch("createdAt")).to eq(read.fetch("createdAt"))
       expect(written.fetch("updatedAt")).to eq(read.fetch("updatedAt"))
-      expect { Time.iso8601(written.fetch("createdAt")) }.not_to raise_error
+      expect(written.fetch("createdAt")).to match(/\.\d{6}\+00:00\z/)
+      expect(written.fetch("updatedAt")).to match(/\.\d{6}\+00:00\z/)
     end
+  end
+
+  it "includes the JSON:API 1.1 version in success documents" do
+    example = create(:example)
+
+    get resource_path(example), headers: jsonapi_headers
+
+    expect(parsed_body.fetch("jsonapi")).to eq("version" => "1.1")
   end
 
   # 선언 밖 enum 값은 500 이 아니라 422 다.
@@ -191,12 +228,12 @@ RSpec.describe "Example CRUD", type: :request do
     perform_jsonapi(
       :post,
       collection_path,
-      document(attributes: { title: "Known", privateField: "secret" })
+      document(attributes: { title: "Known", status: "active", score: 42, privateField: "secret" })
     )
 
     expect_error(
-      :bad_request,
-      "INVALID_JSONAPI_DOCUMENT",
+      :unprocessable_content,
+      "VALIDATION_ERROR",
       pointer: "/data/attributes/privateField"
     )
     expect(Example.count).to eq(0)
@@ -219,10 +256,12 @@ RSpec.describe "Example CRUD", type: :request do
         perform_jsonapi(
           :post,
           collection_path,
-          document(attributes: { title: "Rejected" }, relationships: relationships)
+          document(attributes: { title: "Rejected", status: "active", score: 42 }, relationships: relationships)
         )
 
-        expect_error(:bad_request, "INVALID_JSONAPI_DOCUMENT", pointer: pointer)
+        expected_status = :unprocessable_content
+        expected_code = "VALIDATION_ERROR"
+        expect_error(expected_status, expected_code, pointer: pointer)
       end
     end
     expect(Example.count).to eq(0)
@@ -269,7 +308,7 @@ RSpec.describe "Example CRUD", type: :request do
         perform_jsonapi(
           :post,
           collection_path,
-          document(attributes: { title: "Rejected" }, relationships: relationships)
+          document(attributes: { title: "Rejected", status: "active", score: 42 }, relationships: relationships)
         )
 
         expect_error(status, code, pointer: pointer)
@@ -370,7 +409,7 @@ RSpec.describe "Example CRUD", type: :request do
   it "rejects a non-resource data member" do
     perform_jsonapi(:post, collection_path, { data: [] })
 
-    expect_error(:bad_request, "INVALID_JSONAPI_DOCUMENT")
+    expect_error(:unprocessable_content, "VALIDATION_ERROR", pointer: "/data")
   end
 
   it "rejects a mismatched resource type" do
@@ -418,7 +457,7 @@ RSpec.describe "Example CRUD", type: :request do
       document(attributes: { title: "After" })
     )
 
-    expect_error(:conflict, "ID_MISMATCH", pointer: "/data/id")
+    expect_error(:unprocessable_content, "VALIDATION_ERROR", pointer: "/data/id")
     expect(example.reload.title).to eq("Before")
   end
 
@@ -446,8 +485,8 @@ RSpec.describe "Example CRUD", type: :request do
     perform_jsonapi(:patch, resource_path(example), body)
 
     expect_error(
-      :bad_request,
-      "INVALID_JSONAPI_DOCUMENT",
+      :unprocessable_content,
+      "VALIDATION_ERROR",
       pointer: "/data/relationships/owner"
     )
   end

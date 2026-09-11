@@ -54,7 +54,7 @@ ko:
         detail: "HTTP 요청을 처리할 수 없습니다."
       AUTHENTICATION_REQUIRED:
         title: "인증 필요"
-        detail: "로그인 후 이용해 주세요."
+        detail: "이 요청에는 인증이 필요합니다."
       INVALID_TOKEN:
         title: "유효하지 않은 토큰"
         detail: "인증 토큰이 유효하지 않습니다."
@@ -63,7 +63,7 @@ ko:
         detail: "인증 토큰이 만료되었습니다."
       USER_INACTIVE:
         title: "비활성 사용자"
-        detail: "비활성화된 계정입니다."
+        detail: "사용자 계정이 비활성 상태입니다."
       EMAIL_ALREADY_REGISTERED:
         title: "이미 등록된 이메일"
         detail: "이미 등록된 이메일입니다."

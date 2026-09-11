@@ -68,7 +68,12 @@ RSpec.describe "JSON:API 응답 미디어 타입", type: :request do
     echoed = response.headers.fetch("Content-Type")
 
     post "/api/v1/examples",
-         params: { data: { type: "examples", attributes: { title: "Echoed media type" } } }.to_json,
+         params: {
+           data: {
+             type: "examples",
+             attributes: { title: "Echoed media type", status: "draft", score: 0 }
+           }
+         }.to_json,
          headers: auth_headers.merge("CONTENT_TYPE" => echoed)
 
     expect(response).to have_http_status(:created), "읽기 응답의 #{echoed.inspect}를 쓰기가 거절했다"

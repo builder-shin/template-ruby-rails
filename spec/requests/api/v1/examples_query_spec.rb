@@ -174,7 +174,8 @@ RSpec.describe "Example JSON:API query contract", type: :request do
 
     error = document.fetch("errors").first
     expect(error).to include("status" => status.to_s, "code" => code)
-    expect(error.fetch("source")).to eq("parameter" => parameter)
+    source_member = %w[Accept Content-Type].include?(parameter) ? "header" : "parameter"
+    expect(error.fetch("source")).to eq(source_member => parameter)
   end
 
   it "applies every allowlisted filter and operator" do
@@ -230,8 +231,8 @@ RSpec.describe "Example JSON:API query contract", type: :request do
       [ "default", nil, ids_at(3, 2, 1, 0) ],
       [ "title", "sort=title", ids_at(0, 1, 2, 3) ],
       [ "-title", "sort=-title", ids_at(3, 2, 1, 0) ],
-      [ "status", "sort=status", ids_at(1, 2, 3, 0) ],
-      [ "-status", "sort=-status", ids_at(0, 3, 1, 2) ],
+      [ "status", "sort=status", ids_at(0, 1, 2, 3) ],
+      [ "-status", "sort=-status", ids_at(3, 1, 2, 0) ],
       [ "score", "sort=score", ids_at(0, 1, 2, 3) ],
       [ "-score", "sort=-score", ids_at(3, 2, 1, 0) ],
       [ "createdAt", "sort=createdAt", ids_at(0, 1, 2, 3) ],
@@ -259,7 +260,7 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     )
 
     expect(requested_ids.first(2)).to eq([ earlier_id, ids_at(3).first ])
-    expect(requested_ids("sort=status").first(3)).to eq([ earlier_id, *ids_at(1, 2) ])
+    expect(requested_ids("sort=status")[1, 3]).to eq([ earlier_id, *ids_at(1, 2) ])
   end
 
   it "loads allowlisted includes, removes duplicates, and emits an empty included array for include=" do
@@ -376,6 +377,23 @@ RSpec.describe "Example JSON:API query contract", type: :request do
     end
   end
 
+  it "accepts the largest safe derived offset and rejects the next page number" do
+    expect(request_document("page[number]=9007199254740992&page[size]=1").fetch("data")).to eq([])
+
+    expect_query_error(
+      "page[number]=9007199254740993&page[size]=1",
+      code: "INVALID_PAGE",
+      parameter: "page[number]"
+    )
+  end
+
+  it "parses an int64 page size before clamping it to the public maximum" do
+    document = request_document("page[number]=1&page[size]=9223372036854775807")
+
+    expect(document.fetch("data").length).to eq(stored_examples.length)
+    expect(decoded_link_query(document.dig("links", "self"))).to include("page[size]" => "100")
+  end
+
   it "detects raw duplicate single parameters before Rails collapses them" do
     cases = [
       [ "filter[score]=10&filter[score]=20", "INVALID_FILTER", "filter[score]" ],
@@ -399,9 +417,7 @@ RSpec.describe "Example JSON:API query contract", type: :request do
   it "maps scalar and nested filter shape conflicts in both query orders" do
     cases = [
       [ "filter[score]=10&filter[score][exact]=20", "filter[score][exact]" ],
-      [ "filter[score][exact]=20&filter[score]=10", "filter[score]" ],
-      [ "filter[score]=10&filter[score][gt]=20", "filter[score][gt]" ],
-      [ "filter[score][gt]=20&filter[score]=10", "filter[score]" ]
+      [ "filter[score][exact]=20&filter[score]=10", "filter[score]" ]
     ]
 
     cases.each do |query, parameter|
@@ -414,9 +430,9 @@ RSpec.describe "Example JSON:API query contract", type: :request do
   it "maps scalar and nested sort and page shape conflicts in both query orders" do
     cases = [
       [ "sort=score&sort[field]=title", "INVALID_SORT", "sort[field]" ],
-      [ "sort[field]=title&sort=score", "INVALID_SORT", "sort" ],
+      [ "sort[field]=title&sort=score", "INVALID_SORT", "sort[field]" ],
       [ "page[number]=1&page[number][extra]=2", "INVALID_PAGE", "page[number][extra]" ],
-      [ "page[number][extra]=2&page[number]=1", "INVALID_PAGE", "page[number]" ]
+      [ "page[number][extra]=2&page[number]=1", "INVALID_PAGE", "page[number][extra]" ]
     ]
 
     cases.each do |query, code, parameter|
@@ -428,14 +444,14 @@ RSpec.describe "Example JSON:API query contract", type: :request do
 
   it "maps array and hash container conflicts in both orders for every query family" do
     cases = [
-      [ "filter[]=10&filter[score]=20", "INVALID_FILTER", "filter[score]" ],
+      [ "filter[]=10&filter[score]=20", "INVALID_FILTER", "filter[]" ],
       [ "filter[score]=20&filter[]=10", "INVALID_FILTER", "filter[]" ],
-      [ "page[]=1&page[number]=2", "INVALID_PAGE", "page[number]" ],
+      [ "page[]=1&page[number]=2", "INVALID_PAGE", "page[]" ],
       [ "page[number]=2&page[]=1", "INVALID_PAGE", "page[]" ],
-      [ "sort[]=score&sort[field]=title", "INVALID_SORT", "sort[field]" ],
-      [ "sort[field]=title&sort[]=score", "INVALID_SORT", "sort[]" ],
-      [ "include[]=category&include[path]=tags", "INVALID_INCLUDE", "include[path]" ],
-      [ "include[path]=tags&include[]=category", "INVALID_INCLUDE", "include[]" ]
+      [ "sort[]=score&sort[field]=title", "INVALID_SORT", "sort[]" ],
+      [ "sort[field]=title&sort[]=score", "INVALID_SORT", "sort[field]" ],
+      [ "include[]=category&include[path]=tags", "INVALID_INCLUDE", "include[]" ],
+      [ "include[path]=tags&include[]=category", "INVALID_INCLUDE", "include[path]" ]
     ]
 
     aggregate_failures "container conflicts" do
@@ -510,7 +526,8 @@ RSpec.describe "Example JSON:API query contract", type: :request do
 
     get "#{PROBE_PATH}?filter[score]=10&filter[score][gt]=20", headers: jsonapi_headers
 
-    expect_jsonapi_error(status: 400, code: "INVALID_FILTER", parameter: "filter[score][gt]")
+    expect(response).to have_http_status(:ok)
+    expect(parsed_body.fetch("data")).to eq([])
     expect(events).to contain_exactly(
       "start_processing.action_controller",
       "process_action.action_controller"
@@ -534,8 +551,8 @@ RSpec.describe "Example JSON:API query contract", type: :request do
 
   it "maps arbitrary scalar and nested query shape collisions without leaking Rails errors" do
     cases = [
-      [ "unknown=value&unknown[field]=nested", "unknown[field]" ],
-      [ "unknown[field]=nested&unknown=value", "unknown" ]
+      [ "unknown=value&unknown[field]=nested", "unknown" ],
+      [ "unknown[field]=nested&unknown=value", "unknown[field]" ]
     ]
 
     cases.each do |query, parameter|

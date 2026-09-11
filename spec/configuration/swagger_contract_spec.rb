@@ -40,6 +40,7 @@ RSpec.describe "Swagger contract" do
   end
 
   it "uses the local port and exact document schema for each public read path" do
+    expect(openapi.fetch(:openapi)).to eq("3.1.0")
     expect(openapi.fetch(:servers)).to eq([ { url: "http://localhost:4000" } ])
     expect(response_schema_ref("/api/v1/examples", :get, "200"))
       .to eq("#/components/schemas/ExampleCollectionDocument")
@@ -69,16 +70,16 @@ RSpec.describe "Swagger contract" do
 
   it "describes collection, linkage, and related data with different JSON:API shapes" do
     expect(schemas.dig(:ExampleCollectionDocument, :properties, :data, :type)).to eq("array")
-    expect(schemas.dig(:CategoryRelationshipDocument, :properties, :data, :allOf, 0, "$ref"))
+    expect(schemas.dig(:CategoryRelationshipDocument, :properties, :data, :anyOf, 0, :allOf, 0, "$ref"))
       .to eq("#/components/schemas/ExampleCategoryIdentifier")
-    expect(schemas.dig(:CategoryRelationshipDocument, :properties, :data, :nullable)).to be(true)
+    expect(schemas.dig(:CategoryRelationshipDocument, :properties, :data, :anyOf)).to include(type: "null")
     expect(schemas.dig(:TagsRelationshipDocument, :properties, :data, :items, "$ref"))
       .to eq("#/components/schemas/ExampleTagIdentifier")
-    expect(schemas.dig(:CategoryDocument, :properties, :data, :allOf, 0, "$ref"))
+    expect(schemas.dig(:CategoryDocument, :properties, :data, :anyOf, 0, :allOf, 0, "$ref"))
       .to eq("#/components/schemas/ExampleCategoryResource")
     expect(schemas.dig(:TagCollectionDocument, :properties, :data, :items, "$ref"))
       .to eq("#/components/schemas/ExampleTagResource")
-    expect(schemas.dig(:TagCollectionDocument, :required)).to eq(%w[data links])
+    expect(schemas.dig(:TagCollectionDocument, :required)).to eq(%w[data links jsonapi])
     expect(schemas.dig(:TagCollectionDocument, :properties, :meta, :required)).to eq([ "totalCount" ])
   end
 
@@ -125,11 +126,24 @@ RSpec.describe "Swagger contract" do
     expect(request_schema_ref("/api/v1/examples/{id}", :put))
       .to eq("#/components/schemas/ExampleReplaceDocument")
 
-    expect(schemas.dig(:ExampleCreateAttributes, :required)).to eq([ "title" ])
-    expect(schemas.dig(:ExampleReplaceAttributes, :required)).to eq([ "title" ])
+    expect(schemas.dig(:ExampleCreateAttributes, :required)).to eq(%w[title status score])
+    expect(schemas.dig(:ExampleReplaceAttributes, :required)).to eq(%w[title status score])
+    expect(schemas.dig(:ExampleReplaceDocument, :properties, :data, :required)).to include("id")
     expect(schemas.dig(:ExamplePatchDocument, :properties, :data, :anyOf)).to eq(
       [ { required: [ "attributes" ] }, { required: [ "relationships" ] } ]
     )
+  end
+
+  it "documents canonical health responses and reference-name limits" do
+    expect(response_schema_ref("/health/live", :get, "200"))
+      .to eq("#/components/schemas/HealthDocument")
+    expect(response_schema_ref("/health/ready", :get, "503"))
+      .to eq("#/components/schemas/ErrorDocument")
+    expect(schemas.dig(:JsonApiVersion, :properties, :version, :const)).to eq("1.1")
+    expect(schemas.dig(:ExampleCategoryResource, :allOf, 1, :properties, :attributes,
+                       :properties, :name, :maxLength)).to eq(200)
+    expect(schemas.dig(:ExampleTagResource, :allOf, 1, :properties, :attributes,
+                       :properties, :name, :maxLength)).to eq(200)
   end
 
   it "ships a generated Swagger document and verifies it in CI and the production image" do

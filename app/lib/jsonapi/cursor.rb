@@ -40,6 +40,41 @@ module Jsonapi
       raise invalid_cursor(parameter)
     end
 
+    def typed_values(model, terms, attributes, values, parameter)
+      terms.each_with_index.map do |term, index|
+        raw = values[index]
+        raise invalid_cursor(parameter) unless raw.is_a?(String)
+
+        attribute = attributes.fetch(term.name).to_s
+        column = model.columns_hash.fetch(attribute)
+        if model.defined_enums.key?(attribute)
+          raise invalid_cursor(parameter) unless model.defined_enums.fetch(attribute).key?(raw)
+          raw
+        else
+          case column.type
+          when :integer, :bigint
+            value = ScalarGrammar.integer(raw)
+            bits = (column.limit || 4) * 8
+            raise invalid_cursor(parameter) unless (-2**(bits - 1)...2**(bits - 1)).cover?(value)
+            value
+          when :uuid then ScalarGrammar.uuid(raw)
+          when :datetime, :timestamp then ScalarGrammar.timestamp(raw)
+          when :date
+            value = Date.iso8601(raw)
+            raise invalid_cursor(parameter) unless (1..9999).cover?(value.year)
+            value
+          when :boolean
+            raise invalid_cursor(parameter) unless %w[true false].include?(raw)
+            raw == "true"
+          when :string, :text then raw
+          else raise invalid_cursor(parameter)
+          end
+        end
+      end
+    rescue ArgumentError, TypeError
+      raise invalid_cursor(parameter)
+    end
+
     # 커서 값을 문자열로 왕복시킬 수 있는지 본다. 왕복시킬 수 없는 타입이 정렬에
     # 있으면 `next` 링크를 아예 발행할 수 없으므로, 첫 페이지 다음으로 넘어갈
     # 방법이 없는 응답이 나온다 — nullable 거부와 이유가 다르다.

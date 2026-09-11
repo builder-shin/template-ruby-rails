@@ -57,6 +57,23 @@ RSpec.describe "JSON:API errors", type: :request do
         "title" => "리소스를 찾을 수 없음",
         "detail" => "요청한 리소스를 찾을 수 없습니다."
       )
+      expect(parsed_body.fetch("jsonapi")).to eq("version" => "1.1")
+    end
+
+    it "returns HTTP_ERROR with 405 for a known path using an unsupported method" do
+      post "/api/v1/categories", headers: jsonapi_headers
+
+      expect_error(status: 405, code: "HTTP_ERROR")
+      expect(parsed_body.fetch("jsonapi")).to eq("version" => "1.1")
+    end
+
+    it "returns 405 before media negotiation and identifies the allowed methods" do
+      post "/health/live",
+           params: "{}",
+           headers: { "ACCEPT" => "application/xml", "CONTENT_TYPE" => "application/json" }
+
+      expect_error(status: 405, code: "HTTP_ERROR")
+      expect(response.headers.fetch("Allow")).to eq("GET")
     end
 
     it "uses English and varies the cache key by Accept-Language" do
@@ -143,7 +160,9 @@ RSpec.describe "JSON:API errors", type: :request do
       get "#{base_path}/validation", headers: jsonapi_headers
 
       expect_error(status: 422, code: "VALIDATION_ERROR")
-      expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/title")
+      expect(parsed_body.fetch("errors").pluck("source")).to include(
+        "pointer" => "/data/attributes/title"
+      )
     end
 
     it "returns a safe 500 for unknown error codes" do

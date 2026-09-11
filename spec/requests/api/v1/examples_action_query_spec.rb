@@ -65,7 +65,7 @@ RSpec.describe "Example action query allowlists", type: :request do
   it "maps a raw query shape collision on the real Example index" do
     get "#{collection_path}?unknown=value&unknown[field]=nested", headers: jsonapi_headers
 
-    expect_query_error("INVALID_QUERY_PARAMETER", "unknown[field]")
+    expect_query_error("INVALID_QUERY_PARAMETER", "unknown")
     expect(response.body).not_to include("ActionController::BadRequest", "Conflicting types")
   end
 

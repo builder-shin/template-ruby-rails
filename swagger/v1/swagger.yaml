@@ -1,11 +1,47 @@
 ---
-openapi: 3.0.1
+openapi: 3.1.0
 info:
   title: Template Ruby Rails Example API
   version: v1
 servers:
 - url: http://localhost:4000
 paths:
+  "/health/live":
+    get:
+      summary: Liveness probe
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/HealthDocument"
+  "/health/ready":
+    get:
+      summary: Readiness probe
+      responses:
+        '200':
+          description: JSON:API document
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/HealthDocument"
+        '503':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+  "/api/schema":
+    get:
+      summary: OpenAPI schema
+      responses:
+        '200':
+          description: OpenAPI 3.1 document
+          content:
+            application/json:
+              schema:
+                type: object
   "/api/v1/examples":
     get:
       summary: Example 목록 조회
@@ -16,6 +52,252 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleCollectionDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+      parameters:
+      - name: page[number]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740992
+        description: Offset mode only. (number - 1) * clamped size must not exceed
+          9007199254740991.
+      - name: page[size]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          format: int64
+          default: 20
+        description: Positive int64, clamped to 100 before computing the offset.
+      - name: page[totals]
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+        description: Include totalCount and the last offset page.
+      - name: page[after]
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 4096
+        description: Opaque cursor; empty starts at the boundary. Cannot combine with
+          number or the other cursor direction.
+      - name: page[before]
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 4096
+        description: Opaque cursor; empty starts at the boundary. Cannot combine with
+          number or the other cursor direction.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated fields; prefix - for descending: title, status,
+          score, createdAt, updatedAt. Default: -createdAt.'
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated relationships: category, tags. Empty requests
+          included: [].'
+      - name: filter[title][exact]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: exact
+      - name: filter[title]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Alias of exact.
+      - name: filter[title][contains]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Case-sensitive literal substring.
+      - name: filter[status][exact]
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - draft
+          - active
+          - archived
+        description: exact
+      - name: filter[status]
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - draft
+          - active
+          - archived
+        description: Alias of exact.
+      - name: filter[status][in]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Comma-separated values.
+      - name: filter[score][exact]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: -2147483648
+          maximum: 2147483647
+        description: exact
+      - name: filter[score]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: -2147483648
+          maximum: 2147483647
+        description: Alias of exact.
+      - name: filter[score][gt]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: -2147483648
+          maximum: 2147483647
+        description: gt
+      - name: filter[score][gte]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: -2147483648
+          maximum: 2147483647
+        description: gte
+      - name: filter[score][lt]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: -2147483648
+          maximum: 2147483647
+        description: lt
+      - name: filter[score][lte]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: -2147483648
+          maximum: 2147483647
+        description: lte
+      - name: filter[score][in]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Comma-separated values.
+      - name: filter[category.id][exact]
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+        description: exact
+      - name: filter[category.id]
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+        description: Alias of exact.
+      - name: filter[category.id][in]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Comma-separated values.
+      - name: filter[category.id][isNull]
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: isNull
+      - name: filter[createdAt][exact]
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: exact
+      - name: filter[createdAt]
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: Alias of exact.
+      - name: filter[createdAt][gt]
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: gt
+      - name: filter[createdAt][gte]
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: gte
+      - name: filter[createdAt][lt]
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: lt
+      - name: filter[createdAt][lte]
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: lte
     post:
       summary: Example 생성
       responses:
@@ -25,6 +307,59 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleDocument"
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Canonical URL of the created example.
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '409':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
       requestBody:
@@ -50,6 +385,44 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+      parameters:
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated relationships: category, tags. Empty requests
+          included: [].'
     patch:
       summary: Example 일부 수정
       responses:
@@ -59,6 +432,60 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '409':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
       requestBody:
@@ -82,6 +509,65 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleDocument"
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Canonical URL of the created example.
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '409':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
       requestBody:
@@ -95,6 +581,48 @@ paths:
       responses:
         '204':
           description: No Content
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
   "/api/v1/examples/{id}/relationships/category":
@@ -114,11 +642,95 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/CategoryRelationshipDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
     patch:
       summary: Category 관계 교체
       responses:
         '204':
           description: No Content
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '409':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
       requestBody:
@@ -126,7 +738,7 @@ paths:
         content:
           application/vnd.api+json:
             schema:
-              "$ref": "#/components/schemas/CategoryRelationshipDocument"
+              "$ref": "#/components/schemas/CategoryRelationshipWriteDocument"
   "/api/v1/examples/{id}/category":
     parameters:
     - name: id
@@ -144,6 +756,36 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/CategoryDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
   "/api/v1/examples/{id}/relationships/tags":
     parameters:
     - name: id
@@ -161,11 +803,95 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/TagsRelationshipDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
     post:
       summary: Tag 관계 추가
       responses:
         '204':
           description: No Content
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '409':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
       requestBody:
@@ -173,12 +899,66 @@ paths:
         content:
           application/vnd.api+json:
             schema:
-              "$ref": "#/components/schemas/TagsRelationshipDocument"
+              "$ref": "#/components/schemas/TagsRelationshipWriteDocument"
     patch:
       summary: Tag 관계 교체
       responses:
         '204':
           description: No Content
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '409':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
       requestBody:
@@ -186,12 +966,66 @@ paths:
         content:
           application/vnd.api+json:
             schema:
-              "$ref": "#/components/schemas/TagsRelationshipDocument"
+              "$ref": "#/components/schemas/TagsRelationshipWriteDocument"
     delete:
       summary: Tag 관계 제거
       responses:
         '204':
           description: No Content
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '409':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
       requestBody:
@@ -199,7 +1033,7 @@ paths:
         content:
           application/vnd.api+json:
             schema:
-              "$ref": "#/components/schemas/TagsRelationshipDocument"
+              "$ref": "#/components/schemas/TagsRelationshipWriteDocument"
   "/api/v1/examples/{id}/tags":
     parameters:
     - name: id
@@ -217,6 +1051,55 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/TagCollectionDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+      parameters:
+      - name: page[number]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740992
+        description: Offset mode only. (number - 1) * clamped size must not exceed
+          9007199254740991.
+      - name: page[size]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          format: int64
+          default: 20
+        description: Positive int64, clamped to 100 before computing the offset.
   "/api/v1/categories":
     get:
       summary: Category 목록 조회
@@ -227,6 +1110,103 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleCategoryCollectionDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+      parameters:
+      - name: page[number]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740992
+        description: Offset mode only. (number - 1) * clamped size must not exceed
+          9007199254740991.
+      - name: page[size]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          format: int64
+          default: 20
+        description: Positive int64, clamped to 100 before computing the offset.
+      - name: page[totals]
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+        description: Include totalCount and the last offset page.
+      - name: page[after]
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 4096
+        description: Opaque cursor; empty starts at the boundary. Cannot combine with
+          number or the other cursor direction.
+      - name: page[before]
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 4096
+        description: Opaque cursor; empty starts at the boundary. Cannot combine with
+          number or the other cursor direction.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated fields; prefix - for descending: name, createdAt.
+          Default: name.'
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated relationships: . Empty requests included: [].'
+      - name: filter[name][exact]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: exact
+      - name: filter[name]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Alias of exact.
+      - name: filter[name][contains]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Case-sensitive literal substring.
   "/api/v1/categories/{id}":
     parameters:
     - name: id
@@ -244,6 +1224,43 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleCategoryDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+      parameters:
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated relationships: . Empty requests included: [].'
   "/api/v1/tags":
     get:
       summary: Tag 목록 조회
@@ -254,6 +1271,103 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleTagCollectionDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+      parameters:
+      - name: page[number]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740992
+        description: Offset mode only. (number - 1) * clamped size must not exceed
+          9007199254740991.
+      - name: page[size]
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          format: int64
+          default: 20
+        description: Positive int64, clamped to 100 before computing the offset.
+      - name: page[totals]
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+        description: Include totalCount and the last offset page.
+      - name: page[after]
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 4096
+        description: Opaque cursor; empty starts at the boundary. Cannot combine with
+          number or the other cursor direction.
+      - name: page[before]
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 4096
+        description: Opaque cursor; empty starts at the boundary. Cannot combine with
+          number or the other cursor direction.
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated fields; prefix - for descending: name, createdAt.
+          Default: name.'
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated relationships: . Empty requests included: [].'
+      - name: filter[name][exact]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: exact
+      - name: filter[name]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Alias of exact.
+      - name: filter[name][contains]
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Case-sensitive literal substring.
   "/api/v1/tags/{id}":
     parameters:
     - name: id
@@ -271,6 +1385,43 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/ExampleTagDocument"
+        '400':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '404':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+      parameters:
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+        description: 'Comma-separated relationships: . Empty requests included: [].'
   "/api/v1/users/me":
     get:
       summary: 내 프로필 조회
@@ -281,6 +1432,30 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/UserDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       security:
       - BearerAuth: []
   "/api/v1/auth/register":
@@ -293,6 +1468,42 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/UserDocument"
+          headers:
+            Location:
+              schema:
+                type: string
+                enum:
+                - "/api/v1/users/me"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '409':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       requestBody:
         required: true
         content:
@@ -309,6 +1520,42 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/AuthTokenDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       requestBody:
         required: true
         content:
@@ -325,6 +1572,42 @@ paths:
             application/vnd.api+json:
               schema:
                 "$ref": "#/components/schemas/AuthTokenDocument"
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '403':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       requestBody:
         required: true
         content:
@@ -337,6 +1620,36 @@ paths:
       responses:
         '204':
           description: No Content
+        '401':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '406':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '415':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '422':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
+        '500':
+          description: JSON:API error
+          content:
+            application/vnd.api+json:
+              schema:
+                "$ref": "#/components/schemas/ErrorDocument"
       requestBody:
         required: true
         content:
@@ -349,6 +1662,97 @@ components:
       type: http
       scheme: bearer
   schemas:
+    JsonApiVersion:
+      type: object
+      required:
+      - version
+      properties:
+        version:
+          type: string
+          const: '1.1'
+    HealthDocument:
+      type: object
+      required:
+      - data
+      - meta
+      - jsonapi
+      properties:
+        data:
+          type: 'null'
+        meta:
+          type: object
+          required:
+          - status
+          properties:
+            status:
+              type: string
+              const: ok
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
+    ErrorDocument:
+      type: object
+      required:
+      - errors
+      - jsonapi
+      properties:
+        errors:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+              code:
+                type: string
+                enum:
+                - NOT_ACCEPTABLE
+                - UNSUPPORTED_MEDIA_TYPE
+                - INVALID_JSONAPI_DOCUMENT
+                - INVALID_QUERY_PARAMETER
+                - INVALID_FILTER
+                - INVALID_SORT
+                - INVALID_INCLUDE
+                - INVALID_PAGE
+                - RESOURCE_NOT_FOUND
+                - RELATIONSHIP_RESOURCE_NOT_FOUND
+                - TYPE_MISMATCH
+                - ID_MISMATCH
+                - CLIENT_GENERATED_ID_UNSUPPORTED
+                - RESOURCE_CONFLICT
+                - VALIDATION_ERROR
+                - INTERNAL_SERVER_ERROR
+                - HTTP_ERROR
+                - AUTHENTICATION_REQUIRED
+                - INVALID_TOKEN
+                - TOKEN_EXPIRED
+                - USER_INACTIVE
+                - EMAIL_ALREADY_REGISTERED
+                - INVALID_CREDENTIALS
+                - TOKEN_REVOKED
+              title:
+                type: string
+              detail:
+                type: string
+              source:
+                type: object
+                properties:
+                  pointer:
+                    type: string
+                  parameter:
+                    type: string
+                  header:
+                    type: string
+                required: []
+              meta:
+                type: object
+            required:
+            - status
+            - code
+            - title
+            - detail
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     UserIdentifier:
       type: object
       required:
@@ -362,6 +1766,8 @@ components:
         id:
           type: string
           format: uuid
+        meta:
+          type: object
     UserAttributes:
       type: object
       required:
@@ -373,6 +1779,7 @@ components:
         email:
           type: string
           format: email
+          maxLength: 254
         isActive:
           type: boolean
         createdAt:
@@ -395,13 +1802,21 @@ components:
             "$ref": "#/components/schemas/UserAttributes"
           links:
             type: object
+            properties:
+              self:
+                type: string
+            required:
+            - self
     UserDocument:
       type: object
       required:
       - data
+      - jsonapi
       properties:
         data:
           "$ref": "#/components/schemas/UserResource"
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     AuthCredentialsAttributes:
       type: object
       required:
@@ -416,6 +1831,8 @@ components:
           type: string
           minLength: 12
           maxLength: 128
+          writeOnly: true
+      additionalProperties: false
     AuthRegisterDocument:
       type: object
       required:
@@ -433,6 +1850,8 @@ components:
               - users
             attributes:
               "$ref": "#/components/schemas/AuthCredentialsAttributes"
+          additionalProperties: false
+      additionalProperties: false
     AuthLoginDocument:
       type: object
       required:
@@ -450,6 +1869,8 @@ components:
               - authCredentials
             attributes:
               "$ref": "#/components/schemas/AuthCredentialsAttributes"
+          additionalProperties: false
+      additionalProperties: false
     RefreshTokenAttributes:
       type: object
       required:
@@ -458,6 +1879,7 @@ components:
         refreshToken:
           type: string
           minLength: 1
+      additionalProperties: false
     RefreshTokenDocument:
       type: object
       required:
@@ -475,6 +1897,8 @@ components:
               - refreshTokens
             attributes:
               "$ref": "#/components/schemas/RefreshTokenAttributes"
+          additionalProperties: false
+      additionalProperties: false
     AuthTokenIdentifier:
       type: object
       required:
@@ -488,6 +1912,8 @@ components:
         id:
           type: string
           format: uuid
+        meta:
+          type: object
     AuthTokenAttributes:
       type: object
       required:
@@ -524,9 +1950,12 @@ components:
       type: object
       required:
       - data
+      - jsonapi
       properties:
         data:
           "$ref": "#/components/schemas/AuthTokenResource"
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     ExampleIdentifier:
       type: object
       required:
@@ -540,6 +1969,8 @@ components:
         id:
           type: string
           format: uuid
+        meta:
+          type: object
     ExampleCategoryIdentifier:
       type: object
       required:
@@ -553,6 +1984,8 @@ components:
         id:
           type: string
           format: uuid
+        meta:
+          type: object
     ExampleTagIdentifier:
       type: object
       required:
@@ -566,6 +1999,8 @@ components:
         id:
           type: string
           format: uuid
+        meta:
+          type: object
     ExampleAttributes:
       type: object
       required:
@@ -578,10 +2013,12 @@ components:
       properties:
         title:
           type: string
+          minLength: 1
           maxLength: 200
         description:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         status:
           type: string
           enum:
@@ -602,15 +2039,15 @@ components:
           readOnly: true
     ExampleCreateAttributes:
       type: object
-      required:
-      - title
       properties:
         title:
           type: string
+          minLength: 1
           maxLength: 200
         description:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         status:
           type: string
           enum:
@@ -621,15 +2058,22 @@ components:
           type: integer
           minimum: 0
           maximum: 100
+      required:
+      - title
+      - status
+      - score
+      additionalProperties: false
     ExamplePatchAttributes:
       type: object
       properties:
         title:
           type: string
+          minLength: 1
           maxLength: 200
         description:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         status:
           type: string
           enum:
@@ -640,17 +2084,19 @@ components:
           type: integer
           minimum: 0
           maximum: 100
+      required: []
+      additionalProperties: false
     ExampleReplaceAttributes:
       type: object
-      required:
-      - title
       properties:
         title:
           type: string
+          minLength: 1
           maxLength: 200
         description:
-          type: string
-          nullable: true
+          type:
+          - string
+          - 'null'
         status:
           type: string
           enum:
@@ -661,6 +2107,11 @@ components:
           type: integer
           minimum: 0
           maximum: 100
+      required:
+      - title
+      - status
+      - score
+      additionalProperties: false
     ExampleCategoryResource:
       allOf:
       - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
@@ -676,8 +2127,14 @@ components:
             properties:
               name:
                 type: string
+                maxLength: 200
           links:
             type: object
+            properties:
+              self:
+                type: string
+            required:
+            - self
     ExampleTagResource:
       allOf:
       - "$ref": "#/components/schemas/ExampleTagIdentifier"
@@ -693,8 +2150,14 @@ components:
             properties:
               name:
                 type: string
+                maxLength: 200
           links:
             type: object
+            properties:
+              self:
+                type: string
+            required:
+            - self
     ExampleRelationships:
       type: object
       required:
@@ -708,11 +2171,20 @@ components:
           - links
           properties:
             data:
-              allOf:
-              - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
-              nullable: true
+              anyOf:
+              - allOf:
+                - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
+              - type: 'null'
             links:
               type: object
+              properties:
+                self:
+                  type: string
+                related:
+                  type: string
+              required:
+              - self
+              - related
         tags:
           type: object
           required:
@@ -725,6 +2197,14 @@ components:
                 "$ref": "#/components/schemas/ExampleTagIdentifier"
             links:
               type: object
+              properties:
+                self:
+                  type: string
+                related:
+                  type: string
+              required:
+              - self
+              - related
     ExampleWriteRelationships:
       type: object
       properties:
@@ -734,9 +2214,23 @@ components:
           - data
           properties:
             data:
-              allOf:
-              - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
-              nullable: true
+              anyOf:
+              - type: object
+                properties:
+                  type:
+                    type: string
+                    enum:
+                    - exampleCategories
+                  id:
+                    type: string
+                  meta:
+                    type: object
+                required:
+                - type
+                - id
+                additionalProperties: false
+              - type: 'null'
+          additionalProperties: false
         tags:
           type: object
           required:
@@ -744,8 +2238,25 @@ components:
           properties:
             data:
               type: array
+              uniqueItems: true
               items:
-                "$ref": "#/components/schemas/ExampleTagIdentifier"
+                type: object
+                properties:
+                  type:
+                    type: string
+                    enum:
+                    - exampleTags
+                  id:
+                    type: string
+                  meta:
+                    type: object
+                required:
+                - type
+                - id
+                additionalProperties: false
+          additionalProperties: false
+      additionalProperties: false
+      minProperties: 1
     ExampleResource:
       allOf:
       - "$ref": "#/components/schemas/ExampleIdentifier"
@@ -761,6 +2272,11 @@ components:
             "$ref": "#/components/schemas/ExampleRelationships"
           links:
             type: object
+            properties:
+              self:
+                type: string
+            required:
+            - self
     ExampleCreateDocument:
       type: object
       required:
@@ -780,6 +2296,8 @@ components:
               "$ref": "#/components/schemas/ExampleCreateAttributes"
             relationships:
               "$ref": "#/components/schemas/ExampleWriteRelationships"
+          additionalProperties: false
+      additionalProperties: false
     ExamplePatchDocument:
       type: object
       required:
@@ -807,6 +2325,8 @@ components:
               "$ref": "#/components/schemas/ExamplePatchAttributes"
             relationships:
               "$ref": "#/components/schemas/ExampleWriteRelationships"
+          additionalProperties: false
+      additionalProperties: false
     ExampleReplaceDocument:
       type: object
       required:
@@ -830,10 +2350,13 @@ components:
               "$ref": "#/components/schemas/ExampleReplaceAttributes"
             relationships:
               "$ref": "#/components/schemas/ExampleWriteRelationships"
+          additionalProperties: false
+      additionalProperties: false
     ExampleDocument:
       type: object
       required:
       - data
+      - jsonapi
       properties:
         data:
           "$ref": "#/components/schemas/ExampleResource"
@@ -843,11 +2366,14 @@ components:
             oneOf:
             - "$ref": "#/components/schemas/ExampleCategoryResource"
             - "$ref": "#/components/schemas/ExampleTagResource"
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     ExampleCollectionDocument:
       type: object
       required:
       - data
       - links
+      - jsonapi
       properties:
         data:
           type: array
@@ -869,21 +2395,65 @@ components:
               minimum: 0
         links:
           type: object
+          properties:
+            self:
+              type:
+              - string
+              - 'null'
+            first:
+              type:
+              - string
+              - 'null'
+            prev:
+              type:
+              - string
+              - 'null'
+            next:
+              type:
+              - string
+              - 'null'
+            last:
+              type:
+              - string
+              - 'null'
+          required:
+          - self
+          - first
+          - prev
+          - next
+          - last
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     CategoryRelationshipDocument:
       type: object
       required:
       - data
+      - jsonapi
+      - links
       properties:
         data:
-          allOf:
-          - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
-          nullable: true
+          anyOf:
+          - allOf:
+            - "$ref": "#/components/schemas/ExampleCategoryIdentifier"
+          - type: 'null'
         links:
           type: object
+          properties:
+            self:
+              type: string
+            related:
+              type: string
+          required:
+          - self
+          - related
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     TagsRelationshipDocument:
       type: object
       required:
       - data
+      - jsonapi
+      - links
       properties:
         data:
           type: array
@@ -891,20 +2461,35 @@ components:
             "$ref": "#/components/schemas/ExampleTagIdentifier"
         links:
           type: object
+          properties:
+            self:
+              type: string
+            related:
+              type: string
+          required:
+          - self
+          - related
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     CategoryDocument:
       type: object
       required:
       - data
+      - jsonapi
       properties:
         data:
-          allOf:
-          - "$ref": "#/components/schemas/ExampleCategoryResource"
-          nullable: true
+          anyOf:
+          - allOf:
+            - "$ref": "#/components/schemas/ExampleCategoryResource"
+          - type: 'null'
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     TagCollectionDocument:
       type: object
       required:
       - data
       - links
+      - jsonapi
       properties:
         data:
           type: array
@@ -920,18 +2505,51 @@ components:
               minimum: 0
         links:
           type: object
+          properties:
+            self:
+              type:
+              - string
+              - 'null'
+            first:
+              type:
+              - string
+              - 'null'
+            prev:
+              type:
+              - string
+              - 'null'
+            next:
+              type:
+              - string
+              - 'null'
+            last:
+              type:
+              - string
+              - 'null'
+          required:
+          - self
+          - first
+          - prev
+          - next
+          - last
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     ExampleCategoryDocument:
       type: object
       required:
       - data
+      - jsonapi
       properties:
         data:
           "$ref": "#/components/schemas/ExampleCategoryResource"
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     ExampleCategoryCollectionDocument:
       type: object
       required:
       - data
       - links
+      - jsonapi
       properties:
         data:
           type: array
@@ -947,18 +2565,51 @@ components:
               minimum: 0
         links:
           type: object
+          properties:
+            self:
+              type:
+              - string
+              - 'null'
+            first:
+              type:
+              - string
+              - 'null'
+            prev:
+              type:
+              - string
+              - 'null'
+            next:
+              type:
+              - string
+              - 'null'
+            last:
+              type:
+              - string
+              - 'null'
+          required:
+          - self
+          - first
+          - prev
+          - next
+          - last
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     ExampleTagDocument:
       type: object
       required:
       - data
+      - jsonapi
       properties:
         data:
           "$ref": "#/components/schemas/ExampleTagResource"
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
     ExampleTagCollectionDocument:
       type: object
       required:
       - data
       - links
+      - jsonapi
       properties:
         data:
           type: array
@@ -974,3 +2625,79 @@ components:
               minimum: 0
         links:
           type: object
+          properties:
+            self:
+              type:
+              - string
+              - 'null'
+            first:
+              type:
+              - string
+              - 'null'
+            prev:
+              type:
+              - string
+              - 'null'
+            next:
+              type:
+              - string
+              - 'null'
+            last:
+              type:
+              - string
+              - 'null'
+          required:
+          - self
+          - first
+          - prev
+          - next
+          - last
+        jsonapi:
+          "$ref": "#/components/schemas/JsonApiVersion"
+    CategoryRelationshipWriteDocument:
+      type: object
+      properties:
+        data:
+          anyOf:
+          - type: object
+            properties:
+              type:
+                type: string
+                enum:
+                - exampleCategories
+              id:
+                type: string
+              meta:
+                type: object
+            required:
+            - type
+            - id
+            additionalProperties: false
+          - type: 'null'
+      required:
+      - data
+      additionalProperties: false
+    TagsRelationshipWriteDocument:
+      type: object
+      properties:
+        data:
+          type: array
+          uniqueItems: true
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum:
+                - exampleTags
+              id:
+                type: string
+              meta:
+                type: object
+            required:
+            - type
+            - id
+            additionalProperties: false
+      required:
+      - data
+      additionalProperties: false

@@ -11,6 +11,12 @@ RSpec.describe "Health endpoints", type: :request do
     get "/health/live", headers: { "ACCEPT" => "application/xml" }
 
     expect(response).to have_http_status(:ok)
+    expect(response.headers.fetch("Content-Type")).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
+    expect(parsed_body).to eq(
+      "data" => nil,
+      "meta" => { "status" => "ok" },
+      "jsonapi" => { "version" => "1.1" }
+    )
   end
 
   it "reports readiness after a successful SELECT 1" do
@@ -20,6 +26,12 @@ RSpec.describe "Health endpoints", type: :request do
     get "/health/ready", headers: { "ACCEPT" => "application/xml" }
 
     expect(response).to have_http_status(:ok)
+    expect(response.headers.fetch("Content-Type")).to eq(JsonapiRequestHelper::JSONAPI_MEDIA_TYPE)
+    expect(parsed_body).to eq(
+      "data" => nil,
+      "meta" => { "status" => "ok" },
+      "jsonapi" => { "version" => "1.1" }
+    )
   end
 
   [
@@ -33,6 +45,8 @@ RSpec.describe "Health endpoints", type: :request do
       get "/health/ready"
 
       expect(response).to have_http_status(:service_unavailable)
+      expect(parsed_body.dig("errors", 0)).to include("status" => "503", "code" => "INTERNAL_SERVER_ERROR")
+      expect(parsed_body.fetch("jsonapi")).to eq("version" => "1.1")
       expect(response.body).not_to include(
         "SELECT 1",
         "secret_table",

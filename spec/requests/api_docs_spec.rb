@@ -9,7 +9,18 @@ RSpec.describe "API documentation", type: :request do
 
     expect(response).to have_http_status(:ok)
     expect(YAML.safe_load(response.body, aliases: true)).to include(
-      "openapi" => "3.0.1",
+      "openapi" => "3.1.0",
+      "paths" => include("/api/v1/examples", "/api/v1/categories", "/api/v1/tags")
+    )
+  end
+
+  it "serves the canonical schema endpoint as OpenAPI JSON while retaining the YAML alias" do
+    get "/api/schema"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.media_type).to eq("application/json")
+    expect(parsed_body).to include(
+      "openapi" => "3.1.0",
       "paths" => include("/api/v1/examples", "/api/v1/categories", "/api/v1/tags")
     )
   end

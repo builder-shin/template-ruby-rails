@@ -6,6 +6,7 @@ module JsonapiNegotiation
   extend ActiveSupport::Concern
 
   JSONAPI_MEDIA_TYPE = "application/vnd.api+json"
+  JSONAPI_VERSION = { "version" => "1.1" }.freeze
   WRITE_METHODS = %w[POST PUT PATCH DELETE].freeze
   TOKEN = /\A[!#$%&'*+.^_`|~0-9A-Za-z-]+\z/
   QUALITY = /\A(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)\z/
@@ -14,16 +15,46 @@ module JsonapiNegotiation
   included do
     before_action :negotiate_jsonapi_request
     after_action :strip_jsonapi_response_media_type_parameters
+    after_action :append_jsonapi_version
   end
 
   private
 
-  def negotiate_jsonapi_request
-    validate_jsonapi_accept!
-    return unless WRITE_METHODS.include?(request.request_method) && jsonapi_body.bytesize.positive?
+  def process_action(*)
+    unless jsonapi_request_body_expected?
+      # Rails merges body parameters when filters first access params. Supply the
+      # empty body promised by bodyless routes before that lazy parser runs.
+      request.set_header("action_dispatch.request.request_parameters", {})
+      request.delete_header("action_dispatch.request.parameters")
+    end
+    super
+  end
 
-    validate_jsonapi_content_type!
-    validate_jsonapi_document!
+  def jsonapi_request_body_expected?
+    %w[POST PUT PATCH].include?(request.request_method) ||
+      (request.delete? && request.path.include?("/relationships/"))
+  end
+
+  def append_jsonapi_version
+    return if response.body.blank?
+    return unless response.headers["Content-Type"].to_s.split(";").first.casecmp?(JSONAPI_MEDIA_TYPE)
+
+    document = JSON.parse(response.body)
+    return unless document.is_a?(Hash)
+
+    document["jsonapi"] ||= JSONAPI_VERSION
+    self.response_body = JSON.generate(document)
+    response.headers.delete("Content-Length")
+  rescue JSON::ParserError
+    nil
+  end
+
+  def negotiate_jsonapi_request
+    if jsonapi_request_body_expected?
+      validate_jsonapi_content_type!
+      validate_jsonapi_document!
+    end
+    validate_jsonapi_accept!
   end
 
   # JSON:API 1.1 §5.1은 응답의 미디어 타입에 파라미터를 붙이는 것을 금지한다.
@@ -73,7 +104,8 @@ module JsonapiNegotiation
       next unless specificity
 
       if media_range == JSONAPI_MEDIA_TYPE
-        qualities[specificity] << jsonapi_accept_quality(parameters)
+        quality = jsonapi_accept_quality(parameters)
+        qualities[specificity] << quality unless quality.nil?
       else
         quality = parameters.fetch("q", "1")
         qualities[specificity] << quality.to_f if parameters.keys.all? { |name| name == "q" } && QUALITY.match?(quality)
@@ -86,7 +118,7 @@ module JsonapiNegotiation
     raise JsonApiError.new(
       status: 406,
       code: "NOT_ACCEPTABLE",
-      source: { parameter: "Accept" }
+      source: { header: "Accept" }
     )
   end
 
@@ -98,21 +130,14 @@ module JsonapiNegotiation
     raise JsonApiError.new(
       status: 415,
       code: "UNSUPPORTED_MEDIA_TYPE",
-      source: { parameter: "Content-Type" }
+      source: { header: "Content-Type" }
     )
   end
 
   def validate_jsonapi_document!
-    document = JSON.parse(jsonapi_body)
-    return if document.is_a?(Hash) && document.key?("data")
-
-    raise JsonApiError.new(
-      status: 400,
-      code: "INVALID_JSONAPI_DOCUMENT",
-      source: { pointer: "/data" }
-    )
+    JSON.parse(jsonapi_body)
   rescue JSON::ParserError
-    raise JsonApiError.new(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+    raise JsonApiError.new(status: 422, code: "VALIDATION_ERROR")
   end
 
   def jsonapi_body
@@ -147,19 +172,19 @@ module JsonapiNegotiation
   end
 
   def jsonapi_accept_quality(parameters)
+    quality = parameters.fetch("q", "1")
+    return unless QUALITY.match?(quality)
+
     return 0.0 unless (parameters.keys - %w[ext profile q]).empty?
     return 0.0 if parameters.key?("ext")
-    return 0.0 if parameters.key?("profile") && !valid_uri_list_parameter?(parameters.fetch("profile"))
-
-    quality = parameters.fetch("q", "1")
-    QUALITY.match?(quality) ? quality.to_f : 0.0
+    quality.to_f
   end
 
   def valid_content_type_parameters?(parameters)
     return false unless (parameters.keys - %w[ext profile]).empty?
     return false if parameters.key?("ext")
 
-    !parameters.key?("profile") || valid_uri_list_parameter?(parameters.fetch("profile"))
+    true
   end
 
   def valid_uri_list_parameter?(raw_value)

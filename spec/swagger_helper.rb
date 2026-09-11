@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require_relative "../config/openapi_contract"
 
 RSpec.configure do |config|
   config.include FactoryBot::Syntax::Methods
@@ -57,16 +58,35 @@ RSpec.configure do |config|
     request_schema: "ExampleReplaceDocument"
   )
   upsert_operation[:responses]["201"] = document_response.call("ExampleDocument")
+  readiness_operation = operation.call("Readiness probe", "HealthDocument")
+  readiness_operation[:responses]["503"] = document_response.call("ErrorDocument")
 
   config.openapi_specs = {
     "v1/swagger.yaml" => {
-      openapi: "3.0.1",
+      openapi: "3.1.0",
       info: {
         title: "Template Ruby Rails Example API",
         version: "v1"
       },
       servers: [ { url: "http://localhost:4000" } ],
       paths: {
+        "/health/live" => {
+          get: operation.call("Liveness probe", "HealthDocument")
+        },
+        "/health/ready" => {
+          get: readiness_operation
+        },
+        "/api/schema" => {
+          get: {
+            summary: "OpenAPI schema",
+            responses: {
+              "200" => {
+                description: "OpenAPI 3.1 document",
+                content: { "application/json" => { schema: { type: "object" } } }
+              }
+            }
+          }
+        },
         "/api/v1/examples" => {
           get: operation.call("Example 목록 조회", "ExampleCollectionDocument"),
           post: operation.call(
@@ -169,6 +189,32 @@ RSpec.configure do |config|
           BearerAuth: { type: "http", scheme: "bearer" }
         },
         schemas: {
+          JsonApiVersion: {
+            type: "object",
+            required: [ "version" ],
+            properties: { version: { type: "string", const: "1.1" } }
+          },
+          HealthDocument: {
+            type: "object",
+            required: %w[data meta jsonapi],
+            properties: {
+              data: { type: "null" },
+              meta: {
+                type: "object",
+                required: [ "status" ],
+                properties: { status: { type: "string", const: "ok" } }
+              },
+              jsonapi: { "$ref" => "#/components/schemas/JsonApiVersion" }
+            }
+          },
+          ErrorDocument: {
+            type: "object",
+            required: %w[errors jsonapi],
+            properties: {
+              errors: { type: "array", minItems: 1, items: { type: "object" } },
+              jsonapi: { "$ref" => "#/components/schemas/JsonApiVersion" }
+            }
+          },
           UserIdentifier: identifier_schema.call("users"),
           UserAttributes: {
             type: "object",
@@ -312,7 +358,7 @@ RSpec.configure do |config|
           },
           ExampleCreateAttributes: {
             type: "object",
-            required: [ "title" ],
+            required: %w[title status score],
             properties: {
               title: { type: "string", maxLength: 200 },
               description: { type: "string", nullable: true },
@@ -331,7 +377,7 @@ RSpec.configure do |config|
           },
           ExampleReplaceAttributes: {
             type: "object",
-            required: [ "title" ],
+            required: %w[title status score],
             properties: {
               title: { type: "string", maxLength: 200 },
               description: { type: "string", nullable: true },
@@ -349,7 +395,7 @@ RSpec.configure do |config|
                   attributes: {
                     type: "object",
                     required: [ "name" ],
-                    properties: { name: { type: "string" } }
+                    properties: { name: { type: "string", maxLength: 200 } }
                   },
                   links: { type: "object" }
                 }
@@ -366,7 +412,7 @@ RSpec.configure do |config|
                   attributes: {
                     type: "object",
                     required: [ "name" ],
-                    properties: { name: { type: "string" } }
+                    properties: { name: { type: "string", maxLength: 200 } }
                   },
                   links: { type: "object" }
                 }
@@ -631,5 +677,6 @@ RSpec.configure do |config|
     }
   }
 
+  config.openapi_specs.each_value { |document| OpenapiContract.enrich!(document) }
   config.openapi_format = :yaml
 end

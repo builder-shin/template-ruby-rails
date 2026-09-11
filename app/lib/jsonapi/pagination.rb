@@ -17,7 +17,8 @@ module Jsonapi
   module Pagination
     MAX_PAGE_SIZE = 100
     DEFAULT_PAGE_SIZE = 20
-    MAX_SQL_INTEGER = (2**63) - 1
+    MAX_QUERY_INTEGER = 9_223_372_036_854_775_807
+    MAX_SAFE_OFFSET = 9_007_199_254_740_991
     POSITIVE_INTEGER = /\A[0-9]+\z/
 
     module_function
@@ -28,10 +29,10 @@ module Jsonapi
     # 그대로 공유하면서도 각자 다른 에러 관례를 유지해야 하기 때문이다. 여기서
     # 예외를 내면 한쪽 관례를 다른 쪽에 강요하게 된다.
     def parse_positive_integer(raw_value)
-      return nil if raw_value.length > MAX_SQL_INTEGER.to_s.length || !POSITIVE_INTEGER.match?(raw_value)
+      return nil if raw_value.length > MAX_QUERY_INTEGER.to_s.length || !POSITIVE_INTEGER.match?(raw_value)
 
       value = Integer(raw_value, 10)
-      return nil unless value.between?(1, MAX_SQL_INTEGER)
+      return nil unless value.between?(1, MAX_QUERY_INTEGER)
 
       value
     rescue ArgumentError

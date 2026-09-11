@@ -99,24 +99,24 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect_error(status: 409, code: "RESOURCE_CONFLICT")
     end
 
-    it "rejects data.type other than users with 409 TYPE_MISMATCH" do
+    it "rejects data.type other than users with 422 VALIDATION_ERROR" do
       post "/api/v1/auth/register", params: register_body(email: email, password: password, type: "authCredentials"),
                                      headers: jsonapi_headers
 
-      expect_error(status: 409, code: "TYPE_MISMATCH")
+      expect_error(status: 422, code: "VALIDATION_ERROR")
       expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/type")
     end
 
-    it "rejects an attribute outside {email, password} with 400 INVALID_JSONAPI_DOCUMENT" do
+    it "rejects an attribute outside {email, password} with 422 VALIDATION_ERROR" do
       body = { data: { type: "users", attributes: { email: email, password: password, isActive: true } } }.to_json
 
       post "/api/v1/auth/register", params: body, headers: jsonapi_headers
 
-      expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+      expect_error(status: 422, code: "VALIDATION_ERROR")
       expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/isActive")
     end
 
-    it "rejects a relationships member with 400 INVALID_JSONAPI_DOCUMENT (this resource has none)" do
+    it "rejects a relationships member with 422 VALIDATION_ERROR (this resource has none)" do
       body = {
         data: {
           type: "users",
@@ -127,8 +127,8 @@ RSpec.describe "Api::V1::Auth", type: :request do
 
       post "/api/v1/auth/register", params: body, headers: jsonapi_headers
 
-      expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
-      expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/relationships/workspace")
+      expect_error(status: 422, code: "VALIDATION_ERROR")
+      expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/relationships")
     end
 
     # 실측(POST /api/v1/examples에 201자 title): 기존 쓰기 라우트도 속성 값
@@ -267,31 +267,31 @@ RSpec.describe "Api::V1::Auth", type: :request do
       end
     end
 
-    it "rejects a non-JSON:API document shape (data not an object) with 400 INVALID_JSONAPI_DOCUMENT" do
+    it "rejects a non-JSON:API document shape (data not an object) with 422 VALIDATION_ERROR" do
       post "/api/v1/auth/register", params: { data: "oops" }.to_json, headers: jsonapi_headers
 
-      expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+      expect_error(status: 422, code: "VALIDATION_ERROR")
     end
 
     # 위 테스트는 `data` 자체가 객체가 아닌 경우만 본다 — 멤버(attributes /
     # relationships)의 모양 검증은 별개의 갈래이고 무가드였다(실측: shape_checked_member가
     # raise하지 않게 바꿔도 66예제가 전부 통과). 그 상태에서 실제 동작은
-    # 400 INVALID_JSONAPI_DOCUMENT → 422 VALIDATION_ERROR(또는 201)로 바뀌어
+    # 422 VALIDATION_ERROR → 422 VALIDATION_ERROR(또는 201)로 바뀌어
     # CrudActions#validate_write_member_shape!와 갈라진다.
-    it "rejects a non-object attributes member with 400 INVALID_JSONAPI_DOCUMENT" do
+    it "rejects a non-object attributes member with 422 VALIDATION_ERROR" do
       post "/api/v1/auth/register", params: { data: { type: "users", attributes: "oops" } }.to_json,
                                      headers: jsonapi_headers
 
-      expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+      expect_error(status: 422, code: "VALIDATION_ERROR")
       expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes")
     end
 
-    it "rejects a non-object relationships member with 400 INVALID_JSONAPI_DOCUMENT" do
+    it "rejects a non-object relationships member with 422 VALIDATION_ERROR" do
       body = { data: { type: "users", attributes: { email: email, password: password }, relationships: "oops" } }
 
       post "/api/v1/auth/register", params: body.to_json, headers: jsonapi_headers
 
-      expect_error(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
+      expect_error(status: 422, code: "VALIDATION_ERROR")
       expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/relationships")
     end
 
@@ -612,12 +612,12 @@ RSpec.describe "Api::V1::Auth", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
-    it "rejects data.type other than authCredentials with 409 TYPE_MISMATCH" do
+    it "rejects data.type other than authCredentials with 422 VALIDATION_ERROR" do
       post "/api/v1/auth/login",
            params: login_body(email: "x@example.com", password: "correct-horse-battery", type: "users"),
            headers: jsonapi_headers
 
-      expect_error(status: 409, code: "TYPE_MISMATCH")
+      expect_error(status: 422, code: "VALIDATION_ERROR")
     end
 
     it "rejects a password shorter than 12 or an email over 254 characters with 422 VALIDATION_ERROR" do
@@ -701,16 +701,17 @@ RSpec.describe "Api::V1::Auth", type: :request do
           post "/api/v1/auth/refresh", params: body.to_json, headers: jsonapi_headers
 
           expect_error(status: 422, code: "VALIDATION_ERROR")
-          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/refreshToken")
+          expected_pointer = body.fetch(:data).key?(:attributes) ? "/data/attributes/refreshToken" : "/data/attributes"
+          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => expected_pointer)
         end
       end
     end
 
-    it "rejects data.type other than refreshTokens with 409 TYPE_MISMATCH" do
+    it "rejects data.type other than refreshTokens with 422 VALIDATION_ERROR" do
       post "/api/v1/auth/refresh", params: refresh_token_body("whatever", type: "authCredentials"),
                                     headers: jsonapi_headers
 
-      expect_error(status: 409, code: "TYPE_MISMATCH")
+      expect_error(status: 422, code: "VALIDATION_ERROR")
     end
 
     # 이 describe 밖의 모든 refresh 테스트는 RSpec의 기본 트랜잭션 픽스처
@@ -829,7 +830,8 @@ RSpec.describe "Api::V1::Auth", type: :request do
           post "/api/v1/auth/logout", params: body.to_json, headers: jsonapi_headers
 
           expect_error(status: 422, code: "VALIDATION_ERROR")
-          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => "/data/attributes/refreshToken")
+          expected_pointer = body.fetch(:data).key?(:attributes) ? "/data/attributes/refreshToken" : "/data/attributes"
+          expect(parsed_body.dig("errors", 0, "source")).to eq("pointer" => expected_pointer)
         end
       end
     end

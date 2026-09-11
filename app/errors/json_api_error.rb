@@ -28,15 +28,18 @@ class JsonApiError < StandardError
     TOKEN_REVOKED
   ].freeze
 
-  attr_reader :status, :code, :source, :context
+  attr_reader :status, :code, :source, :sources, :context
 
-  def initialize(status:, code:, source: nil, context: {})
+  def initialize(status:, code:, source: nil, sources: nil, context: {})
     @status = Integer(status)
     @code = code.to_s
     # :header가 빠져 있으면 정본 가드가 모든 인증 오류에 싣는
     # source_header="Authorization"이 조용히 사라진다 — source.header는 JSON:API
     # 1.1이 정의한 멤버다(spec/errors/json_api_error_spec.rb가 이 슬라이스를 고정한다).
     @source = source&.to_h&.symbolize_keys&.slice(:pointer, :parameter, :header)&.freeze
+    @sources = Array(sources).map do |entry|
+      entry.to_h.symbolize_keys.slice(:pointer, :parameter, :header).freeze
+    end.freeze
     @context = context.to_h.symbolize_keys.freeze
 
     raise ArgumentError, "status must be an HTTP error status" unless (400..599).cover?(@status)

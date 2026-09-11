@@ -83,13 +83,13 @@ RSpec.describe "Development container contract" do
     expect(services.dig("api", "environment", "REDIS_URL")).to eq("redis://redis:6379/0")
     expect(services.dig("worker", "environment", "REDIS_URL")).to eq("redis://redis:6379/0")
 
-    dockerfile = dockerfile_path.read
+    dockerfile = dockerfile_path.read.gsub("\r\n", "\n")
     expect(dockerfile).to include("/health/ready")
     expect(dockerfile).not_to include("/health/live")
   end
 
   it "keeps development and test dependencies out of the final production image and runs Puma only" do
-    dockerfile = dockerfile_path.read
+    dockerfile = dockerfile_path.read.gsub("\r\n", "\n")
 
     expect(dockerfile.scan(/^FROM /).length).to be >= 4
     expect(dockerfile).to match(/^FROM .+ AS base$/)

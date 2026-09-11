@@ -5,9 +5,6 @@ module Api
     class ExamplesController < ApiController
       include JsonapiAuthentication
 
-      RESOURCE_UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
-      private_constant :RESOURCE_UUID
-
       PROTECTED_WRITE_ACTIONS = %i[
         create
         update
@@ -43,6 +40,23 @@ module Api
 
       def model_params_options
         { only: %i[title description status score category tags] }
+      end
+
+      def required_create_attributes
+        %i[title status score]
+      end
+
+      def required_replace_attributes
+        %i[title status score]
+      end
+
+      def write_attribute_rules
+        {
+          title: { type: :string, min: 1, max: 200 },
+          description: { type: :string, nullable: true },
+          status: { type: :string, values: %w[draft active archived] },
+          score: { type: :integer, min: 0, max: 100 }
+        }
       end
 
       def query_contract
@@ -96,9 +110,8 @@ module Api
       end
 
       def normalized_resource_id(value)
-        identifier = value.to_s
-        return identifier.downcase if RESOURCE_UUID.match?(identifier)
-
+        Jsonapi::ScalarGrammar.uuid(value.to_s)
+      rescue ArgumentError
         raise JsonApiError.new(status: 404, code: "RESOURCE_NOT_FOUND")
       end
     end

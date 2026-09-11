@@ -54,7 +54,7 @@ en:
         detail: "The HTTP request could not be processed."
       AUTHENTICATION_REQUIRED:
         title: "Authentication required"
-        detail: "You must be signed in to access this resource."
+        detail: "Authentication is required for this request."
       INVALID_TOKEN:
         title: "Invalid token"
         detail: "The authentication token is invalid."
@@ -63,7 +63,7 @@ en:
         detail: "The authentication token has expired."
       USER_INACTIVE:
         title: "User inactive"
-        detail: "Your account is inactive."
+        detail: "The user account is inactive."
       EMAIL_ALREADY_REGISTERED:
         title: "Email already registered"
         detail: "The email address is already registered."

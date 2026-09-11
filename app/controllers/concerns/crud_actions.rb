@@ -8,6 +8,7 @@ module CrudActions
     include JSONAPI::Pagination
     include JsonapiQuery
     include JsonapiRelationships
+    include JsonapiWriteValidation
 
     before_action :_set_model, only: [ :show, :update, :destroy ]
 
@@ -155,8 +156,7 @@ module CrudActions
     return if performed?
 
     ActiveRecord::Base.transaction do
-      include_symbols = jsonapi_include.map(&:to_sym)
-      render jsonapi: @model, include: include_symbols
+      render_jsonapi_payload(serialize_jsonapi(@model), status: :ok)
     end
   end
 
@@ -174,7 +174,10 @@ module CrudActions
   def create_after_save(success); end
 
   def create
-    validate_jsonapi_write_document!(reject_client_id: true)
+    validate_jsonapi_write_document!(
+      reject_client_id: true,
+      required_attributes: required_create_attributes
+    )
 
     payload = location = nil
     ActiveRecord::Base.transaction do
@@ -199,6 +202,9 @@ module CrudActions
     payload = nil
     ActiveRecord::Base.transaction do
       _set_model unless @model
+      # Serialize embedded replacement with dedicated relationship mutations.
+      # Reload under the lock before assignment loads current association rows.
+      @model.lock!
       update_after_init
       @model.assign_attributes(model_params)
       update_after_assign
@@ -215,14 +221,18 @@ module CrudActions
   def upsert_after_save(success); end
 
   def upsert
-    validate_jsonapi_write_document!(require_matching_id: true)
+    validate_jsonapi_write_document!(
+      require_matching_id: true,
+      require_document_id: true,
+      required_attributes: required_replace_attributes
+    )
     normalized_id = normalized_resource_id(params[:id])
 
     payload = location = nil
     created = false
     ActiveRecord::Base.transaction do
       lock_upsert_id!(normalized_id)
-      @model = klass.find_by(id: normalized_id)
+      @model = klass.lock.find_by(id: normalized_id)
       created = @model.nil?
       @model ||= klass.new(id: normalized_id)
 
@@ -289,7 +299,15 @@ module CrudActions
   end
 
   def model_params
-    jsonapi_deserialize(params, model_params_options)
+    values = jsonapi_deserialize(params, model_params_options)
+    write_attribute_rules.each do |name, rule|
+      next unless rule[:type] == :integer
+
+      key = values.key?(name) ? name : name.to_s
+      value = values[key]
+      values[key] = value.to_i if value.is_a?(Float) && value.finite? && value == value.to_i
+    end
+    values
   end
 
   def serializer_class
@@ -304,12 +322,28 @@ module CrudActions
     {}
   end
 
+  def required_create_attributes
+    []
+  end
+
+  def required_replace_attributes
+    []
+  end
+
   def normalized_resource_id(value)
     value.to_s
   end
 
   def validate_jsonapi_write_document!(reject_client_id: false, require_matching_id: false,
-                                       require_update_members: false)
+                                       require_document_id: false, require_update_members: false,
+                                       required_attributes: [])
+    errors = write_document_errors(
+      raw_write_document,
+      require_id: require_document_id || require_matching_id,
+      require_attributes: !require_update_members,
+      required_attributes: required_attributes
+    )
+    raise_write_validation_errors!(errors)
     data = params[:data]
     unless data.is_a?(ActionController::Parameters)
       raise JsonApiError.new(status: 400, code: "INVALID_JSONAPI_DOCUMENT")
@@ -331,6 +365,14 @@ module CrudActions
       )
     end
 
+    if require_document_id && !data.key?(:id)
+      raise JsonApiError.new(
+        status: 422,
+        code: "VALIDATION_ERROR",
+        source: { pointer: "/data/id" }
+      )
+    end
+
     if require_matching_id && !matching_document_id?(data[:id], params[:id])
       raise JsonApiError.new(
         status: 409,
@@ -339,10 +381,6 @@ module CrudActions
       )
     end
 
-    validate_write_member_shape!(data, :attributes)
-    validate_write_member_shape!(data, :relationships)
-    validate_allowed_attributes!(data[:attributes])
-    validate_allowed_relationships!(data[:relationships])
     validate_embedded_relationships!(data[:relationships])
     return unless require_update_members && !data.key?(:attributes) && !data.key?(:relationships)
 
@@ -353,58 +391,14 @@ module CrudActions
     )
   end
 
-  def validate_write_member_shape!(data, member)
-    return unless data.key?(member)
-    return if data[member].is_a?(ActionController::Parameters)
-
-    raise JsonApiError.new(
-      status: 400,
-      code: "INVALID_JSONAPI_DOCUMENT",
-      source: { pointer: "/data/#{member}" }
-    )
-  end
-
   def matching_document_id?(document_id, request_id)
-    return false if document_id.blank?
-    return true if document_id.to_s == request_id.to_s
-
-    normalized_resource_id(document_id) == normalized_resource_id(request_id)
-  rescue JsonApiError
-    false
+    document_id.is_a?(String) && document_id == request_id.to_s
   end
 
   def replacement_model_params
     allowed_attributes = Array(model_params_options[:only]).map(&:to_s) & klass.column_names
     defaults = klass.column_defaults.slice(*allowed_attributes)
     defaults
-  end
-
-  def validate_allowed_attributes!(attributes)
-    return unless attributes
-
-    allowed = Array(model_params_options[:only]).map(&:to_s) & klass.column_names
-    unsupported = attributes.keys.map(&:to_s).find { |name| !allowed.include?(name) }
-    return unless unsupported
-
-    raise JsonApiError.new(
-      status: 400,
-      code: "INVALID_JSONAPI_DOCUMENT",
-      source: { pointer: "/data/attributes/#{unsupported}" }
-    )
-  end
-
-  def validate_allowed_relationships!(relationships)
-    return unless relationships
-
-    allowed = allowed_relationships.keys.map(&:to_s)
-    unsupported = relationships.keys.map(&:to_s).find { |name| !allowed.include?(name) }
-    return unless unsupported
-
-    raise JsonApiError.new(
-      status: 400,
-      code: "INVALID_JSONAPI_DOCUMENT",
-      source: { pointer: "/data/relationships/#{unsupported}" }
-    )
   end
 
   def validate_embedded_relationships!(relationships)
@@ -414,8 +408,6 @@ module CrudActions
       pointer = "/data/relationships/#{name}"
       raise_invalid_relationship_document(pointer) unless relationship.is_a?(ActionController::Parameters)
 
-      unsupported = relationship.keys.map(&:to_s).find { |member| member != "data" }
-      raise_invalid_relationship_document("#{pointer}/#{unsupported}") if unsupported
       raise_invalid_relationship_document("#{pointer}/data") unless relationship.key?(:data)
 
       policy = allowed_relationships.fetch(name.to_sym)
@@ -448,7 +440,9 @@ module CrudActions
     options = {}
     includes = jsonapi_include.map(&:to_sym)
     options[:include] = includes if includes.any?
-    serializer_class.new(model, options).serializable_hash
+    payload = serializer_class.new(model, options).serializable_hash
+    payload[:included] ||= [] if params.key?(:include)
+    payload
   end
 
   def jsonapi_self_link(payload)

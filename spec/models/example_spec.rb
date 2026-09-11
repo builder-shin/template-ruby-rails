@@ -6,8 +6,8 @@ RSpec.describe Example, type: :model do
   describe "validations" do
     subject(:example) { build(:example) }
 
-    it "rejects a blank title" do
-      example.title = " "
+    it "rejects an empty title" do
+      example.title = ""
 
       expect(example).not_to be_valid
       expect(example.errors[:title]).to be_present

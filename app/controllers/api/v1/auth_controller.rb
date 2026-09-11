@@ -29,56 +29,9 @@ module Api
       REFRESH_ATTRIBUTES = %w[refreshToken].freeze
       private_constant :REGISTER_ATTRIBUTES, :LOGIN_ATTRIBUTES, :REFRESH_ATTRIBUTES
 
-      # users.email의 유니크 위반이 PG 진단 필드에 싣는 제약 이름. 컨테이너에서
-      # 실측(PG::Result#error_field(PG::Result::PG_DIAG_CONSTRAINT_NAME)):
-      # db/migrate/20260205000000_create_auth_schema.rb의 `t.index :email,
-      # unique: true`는 이름을 지정하지 않아 Rails 기본 명명 규칙으로
-      # "index_users_on_email"이 되고, Postgres는 UNIQUE 제약을 지원 유니크
-      # 인덱스로 구현하므로 위반 시 진단 필드에 실리는 이름도 이 인덱스명과
-      # 같다. 다른 유니크 위반(예: 앞으로 users에 추가될 다른 유니크 컬럼)의
-      # 제약 이름은 이와 다르므로 register가 "이메일 중복"으로 잘못 보고하지
-      # 않는다.
       EMAIL_UNIQUE_INDEX = "index_users_on_email"
       private_constant :EMAIL_UNIQUE_INDEX
 
-      # users.email 컬럼(varchar(254))과 정본 AuthEmail(Field(max_length=254))에
-      # 맞춘 상한. normalized_email!이 정규화 전후 **양쪽**에 이 값을 건다.
-      EMAIL_MAX_LENGTH = 254
-      private_constant :EMAIL_MAX_LENGTH
-
-      # 이메일 형식. 정본 EmailStr(email-validator 2.3.0)과 경계값을 맞추되 새
-      # gem을 들이지 않는다. `URI::MailTo::EMAIL_REGEXP`를 쓰지 않는 이유:
-      # 그것은 ASCII 전용이라 정본이 정상으로 받는 비ASCII 주소
-      # ("shørt@example.com", "user@éxample.com")를 거절한다 — 실사용자의 가입을
-      # 막는 방향이라 쓰레기 입력이 통과하는 것보다 나쁘다. 반대로 도메인에
-      # 점이 없는 "a@b"는 통과시켜 정본보다 느슨하기도 했다.
-      #
-      # 로컬파트 원자: ASCII는 RFC 5322 atext, 비ASCII는 구분자(\p{Z})와 제어·
-      # 형식 문자(\p{C})만 뺀 전부. 정본의 ATEXT_INTL(U+0080 이상을 전부 허용)과
-      # "unsafe characters" 거절(NBSP·EN QUAD·ZWSP·IDEOGRAPHIC SPACE·ZWNBSP·
-      # LINE SEPARATOR·SOFT HYPHEN)에 대응한다 — 80개 표본에서 판정이 전부 같다.
-      # 원자 사이의 점은 아래에서 따로 이어 붙인다. 그래서 앞뒤 점과 연속된 점
-      # (dot-atom 위반: ".a@b.com" / "a.@b.com" / "a..b@c.com")이 걸린다.
-      EMAIL_LOCAL_ATOM = /(?:[[:alnum:]!\#$%&'*+\/=?^_`{|}~-]|[^\p{ASCII}\p{Z}\p{C}])+/
-      # 도메인 라벨: 1~63자이고 하이픈으로 시작하거나 끝나지 않는다. IDN 글자와
-      # 결합 문자(NFD로 들어온 "é" = "e" + U+0301)는 허용하고 이모지·기호는
-      # 허용하지 않는다 — 정본에서 IDNA가 막는 것과 같은 층위다(실측:
-      # "a@b例.com" 201, "a@b☃.com"·"a@b😀.com" 422).
-      EMAIL_DOMAIN_LABEL = /[[:alnum:]](?:[[:alnum:]\p{M}-]{0,61}[[:alnum:]\p{M}])?/
-      # 도메인은 점을 최소 하나 가져야 한다 — 정본은 "a@b"를 거절한다.
-      EMAIL_FORMAT = /\A#{EMAIL_LOCAL_ATOM}(?:\.#{EMAIL_LOCAL_ATOM})*@#{EMAIL_DOMAIN_LABEL}(?:\.#{EMAIL_DOMAIN_LABEL})+\z/
-      # 정본은 TLD가 전부 숫자인 도메인을 "globally deliverable이 아니다"로
-      # 거절한다("a@b.1", "a@192.168.0.1"). ICANN도 전부 숫자인 TLD를 허용하지
-      # 않는다. 정규식 안에 부정 전방탐색으로 욱여넣는 대신 한 줄로 분리해 둔다.
-      EMAIL_NUMERIC_TLD = /\.[0-9]+\z/
-      private_constant :EMAIL_LOCAL_ATOM, :EMAIL_DOMAIN_LABEL, :EMAIL_FORMAT, :EMAIL_NUMERIC_TLD
-
-      # 가입. 스펙 6.7 — 중복은 사전 조회로 막지 않는다. User#email에는
-      # uniqueness 검증이 없다(app/models/user.rb 참고) — DB 유니크 인덱스가
-      # INSERT 시점에 막게 두고, 그 위반(ActiveRecord::RecordNotUnique)만 여기서
-      # 붙잡아 409 EMAIL_ALREADY_REGISTERED로 옮긴다. 제약 이름을 확인해 이메일
-      # 유니크 위반일 때만 바꾸고, 그 외의 유니크 위반은 그대로 다시 던져
-      # 상위(JsonapiErrors)의 기본 RESOURCE_CONFLICT 처리로 넘긴다.
       def register
         attributes = parse_write_data!(expected_type: "users", allowed_attributes: REGISTER_ATTRIBUTES)
         email = normalized_email!(attributes)
@@ -182,88 +135,54 @@ module Api
 
       private
 
-      # data.type 검증, attributes/relationships의 멤버 모양 검증, 허용되지 않는
-      # attribute 거부, relationships 전면 거부까지 CrudActions#validate_jsonapi_write_document!와
-      # 같은 순서·같은 오류 코드·같은 pointer 조립으로 수행한다. 검증을 통과한
-      # attributes(ActionController::Parameters, 원시 문자열 값)를 돌려준다 —
-      # email/password 같은 값 자체의 검증(길이 등)은 각 액션이 이어서 한다.
-      #
-      # 값 자체의 검증(refreshToken이 비어 있지 않은 문자열인가, email이 형식·길이를
-      # 지키는가)은 여기가 아니라 각 액션이 부르는 refresh_token!/normalized_email!이
-      # 한다 — 이 메서드는 "문서 모양"만 본다.
+      # Auth documents are strict schema envelopes. Collect independent member
+      # and value errors before touching persistence, with escaped JSON pointers.
       def parse_write_data!(expected_type:, allowed_attributes:)
-        data = params[:data]
-        raise JsonApiError.new(status: 400, code: "INVALID_JSONAPI_DOCUMENT") unless data.is_a?(ActionController::Parameters)
-
-        require_type!(data, expected_type)
-
-        attributes = shape_checked_member(data, :attributes)
-        relationships = shape_checked_member(data, :relationships)
-
-        reject_unsupported_attributes!(attributes, allowed_attributes)
-        reject_relationships!(relationships)
-
+        document = JSON.parse(jsonapi_body)
+        raise JsonApiError.new(status: 422, code: "VALIDATION_ERROR") unless document.is_a?(Hash)
+        errors = []
+        (document.keys - [ "data" ]).each { |key| errors << auth_pointer(key) }
+        data = document["data"]
+        unless data.is_a?(Hash) || data.is_a?(ActionController::Parameters)
+          errors << "/data"
+          raise_auth_errors!(errors)
+        end
+        (data.keys - %w[type attributes]).each { |key| errors << "/data/#{auth_pointer(key).delete_prefix('/')}" }
+        errors << "/data/type" unless data["type"] == expected_type
+        attributes = data["attributes"]
+        if attributes.is_a?(Hash) || attributes.is_a?(ActionController::Parameters)
+          (attributes.keys - allowed_attributes).each { |key| errors << "/data/attributes#{auth_pointer(key)}" }
+          allowed_attributes.each do |name|
+            value = attributes[name]
+            valid = if name == "email"
+              begin
+                Auth::EmailIdentity.normalize(value)
+                true
+              rescue ArgumentError
+                false
+              end
+            elsif name == "password"
+              value.is_a?(String) && value.length.between?(12, 128)
+            else
+              value.is_a?(String) && !value.empty?
+            end
+            errors << "/data/attributes/#{name}" unless valid
+          end
+        else
+          errors << "/data/attributes"
+        end
+        raise_auth_errors!(errors) unless errors.empty?
         attributes
       end
 
-      def require_type!(data, expected_type)
-        return if data[:type] == expected_type
-
-        raise JsonApiError.new(status: 409, code: "TYPE_MISMATCH", source: { pointer: "/data/type" })
+      def auth_pointer(key)
+        "/" + key.to_s.gsub("~", "~0").gsub("/", "~1")
       end
 
-      # data.attributes/data.relationships가 있다면 반드시 객체(ActionController::Parameters)
-      # 여야 한다는 모양 검증. 멤버 자체가 없으면(예: relationships를 아예 안 보낸
-      # 요청) 빈 Parameters를 돌려준다 — CrudActions#validate_write_member_shape!가
-      # "member가 없으면 통과, 있는데 모양이 틀리면 400"인 것과 같다.
-      def shape_checked_member(data, member)
-        return ActionController::Parameters.new unless data.key?(member)
-
-        value = data[member]
-        return value if value.is_a?(ActionController::Parameters)
-
-        raise JsonApiError.new(status: 400, code: "INVALID_JSONAPI_DOCUMENT", source: { pointer: "/data/#{member}" })
+      def raise_auth_errors!(pointers)
+        raise JsonApiError.new(status: 422, code: "VALIDATION_ERROR", sources: pointers.map { |pointer| { pointer: pointer } })
       end
 
-      def reject_unsupported_attributes!(attributes, allowed)
-        unsupported = attributes.keys.find { |key| allowed.exclude?(key) }
-        return unless unsupported
-
-        raise JsonApiError.new(
-          status: 400,
-          code: "INVALID_JSONAPI_DOCUMENT",
-          source: { pointer: "/data/attributes/#{unsupported}" }
-        )
-      end
-
-      # 이 네 라우트는 관계를 하나도 갖지 않는다 — users·authCredentials·
-      # refreshTokens 어느 자원도 관계 스키마가 없다. CrudActions가 만드는
-      # 라우트가 스키마에 없는 관계 이름을 400 INVALID_JSONAPI_DOCUMENT로
-      # 거절하는 것(validate_allowed_relationships!, allowed_relationships가
-      # 빈 자원 기준)과 같은 모양으로 맞춘다 — 안 그러면 같은 실수(스키마에
-      # 없는 관계를 보냄)가 자원마다 다르게 취급된다.
-      def reject_relationships!(relationships)
-        name = relationships.keys.first
-        return if name.nil?
-
-        raise JsonApiError.new(
-          status: 400,
-          code: "INVALID_JSONAPI_DOCUMENT",
-          source: { pointer: "/data/relationships/#{name}" }
-        )
-      end
-
-      # email·password 둘 다 값 자체의 검증은 여기 하나로 모은다(길이 위반 →
-      # 422 VALIDATION_ERROR, pointer는 CrudActions의 RecordInvalid 변환과 같은
-      # 자리 규칙). 컨테이너에서 실측: 기존 쓰기 라우트(POST /examples)에 200자
-      # 제한을 넘는 title을 보내면 정확히 이 코드(422 VALIDATION_ERROR, pointer
-      # /data/attributes/title)가 나온다 — 그 값을 그대로 고정한다.
-      #
-      # 존재 자체를 downstream에 맡길 수 없는 이유: email은 정규화(strip)에서,
-      # password는 Auth::Passwords.verify_password에서 nil이 오면 예외 없이 그대로
-      # 죽는다(각각 NoMethodError/TypeError) — 이 컨트롤러가 직접 막아야 500을
-      # 피한다. refreshToken은 downstream이 안전하게 처리하지만 그래도 여기서
-      # 막는다(refresh_token! 코멘트 참고) — 상태 코드가 정본과 갈리기 때문이다.
       def bounded_string!(attributes, name, min:, max:)
         value = attributes[name]
         return value if value.is_a?(String) && value.length.between?(min, max)
@@ -275,33 +194,11 @@ module Api
         raise JsonApiError.new(status: 422, code: "VALIDATION_ERROR", source: { pointer: "/data/attributes/#{name}" })
       end
 
-      # 이메일에 대한 검증 전부를 여기 모은다. **순서가 계약이다:**
-      #
-      #   1. 원본에 길이 상한을 건다 — 폴딩이 길이를 늘리므로(3번) 정규화 전에도
-      #      상한을 둬서 폴딩 폭발 자체를 미리 자른다.
-      #   2. 정규화한다(strip + 전체 유니코드 케이스 폴딩).
-      #   3. **정규화 결과에 다시** 같은 상한을 건다. 이것이 진짜 계약이다 —
-      #      users.email은 varchar(254)이고 INSERT되는 값은 정규화 결과이지
-      #      원본이 아니다. `String#downcase(:fold)`는 길이를 늘린다("ß" → "ss",
-      #      "ﬁ" → "fi"). 실측: `"a"*230 + "ß"*11 + "@example.com"`은 원본 253자로
-      #      1번을 통과하지만 폴딩 후 264자가 되어 컬럼을 넘고, Postgres의
-      #      StringDataRightTruncation이 JsonapiErrors의 rescue_from StandardError에
-      #      걸려 **무인증 공개 라우트가 500**을 낸다. 검사 대상을 DB에 들어가는
-      #      값과 같게 맞추면 이 갈래가 사라진다.
-      #   4. 형식을 본다. 검사 대상 역시 **정규화 결과**다 — 저장·조회되는 값이
-      #      그것이고, 정본도 형식 검증을 통과한 값을 뒤이어 casefold해 쓴다.
-      #      (예: "aß@example.com"의 폴딩 결과 "ass@example.com"은 ASCII라 아래
-      #      정규식을 통과한다. 원본에 걸면 폴딩이 ASCII를 만들어 내는 이 경우를
-      #      부당하게 거절한다.) EMAIL_FORMAT·EMAIL_NUMERIC_TLD 코멘트 참고.
-      #   5. TLD가 전부 숫자면 거절한다 — 4번과 별개의 판정이라 따로 둔다.
+      # The same helper drives registration, lookup and migration preflight.
       def normalized_email!(attributes)
-        raw = bounded_string!(attributes, "email", min: 1, max: EMAIL_MAX_LENGTH)
-        email = normalize_email(raw)
-        invalid_attribute!("email") unless email.length.between?(1, EMAIL_MAX_LENGTH)
-        invalid_attribute!("email") unless email.match?(EMAIL_FORMAT)
-        invalid_attribute!("email") if email.match?(EMAIL_NUMERIC_TLD)
-
-        email
+        Auth::EmailIdentity.normalize(attributes["email"])
+      rescue ArgumentError
+        invalid_attribute!("email")
       end
 
       # refreshToken은 "비어 있지 않은 문자열"이어야 한다 — 정본

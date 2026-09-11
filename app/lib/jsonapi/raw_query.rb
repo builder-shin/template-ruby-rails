@@ -68,6 +68,10 @@ module Jsonapi
     private_constant :ShapeTree
 
     class << self
+      def string(request)
+        request.get_header("jsonapi.raw_query_string") || request.query_string
+      end
+
       def decode(query_string)
         return [] if query_string.empty?
 

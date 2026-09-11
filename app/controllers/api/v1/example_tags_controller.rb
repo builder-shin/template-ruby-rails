@@ -9,9 +9,6 @@ module Api
     #
     # URL 경로는 `/api/v1/tags`이고 JSON:API type은 `exampleTags`다.
     class ExampleTagsController < ApiController
-      RESOURCE_UUID = /\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i
-      private_constant :RESOURCE_UUID
-
       def allowed_includes
         []
       end
@@ -60,9 +57,8 @@ module Api
       end
 
       def normalized_resource_id(value)
-        identifier = value.to_s
-        return identifier.downcase if RESOURCE_UUID.match?(identifier)
-
+        Jsonapi::ScalarGrammar.uuid(value.to_s)
+      rescue ArgumentError
         raise JsonApiError.new(status: 404, code: "RESOURCE_NOT_FOUND")
       end
     end

@@ -26,8 +26,7 @@ module Auth
     ALGORITHM = "HS256"
     TOKEN_TYPES = %w[access refresh].freeze
     REQUIRED_CLAIMS = %w[sub jti type iat exp iss aud].freeze
-    # SecureRandom.uuid가 만드는 표준 8-4-4-4-12 하이픈 형식. 우리가 발급하는
-    # jti는 전부 이 형식이므로, decode 쪽도 이 형식만 "UUID로 파싱된다"로 받아들인다.
+    # Canonical minted form; decoded UUIDs also accept the shared parser's forms.
     JTI_PATTERN = /\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
 
     # Ruby의 Time.at은 임의의 bignum이나 ±Infinity/NaN까지 받아들이려 든다(±Infinity·
@@ -60,7 +59,11 @@ module Auth
     end
 
     def decode(token, expected_type:)
-      typed_claims(decode_payload(token, verify_expiration: true), expected_type: expected_type)
+      payload = decode_payload(token)
+      claims = typed_claims(payload, expected_type: expected_type)
+      raise TokenExpired if payload["exp"].to_i <= Time.now.to_f - config.leeway_seconds
+
+      claims
     end
 
     # refresh 회전 중 "만료된 refresh token"을 의도적으로 한 번 더 읽는다 — 만료만
@@ -69,7 +72,7 @@ module Auth
     # 자체가 이미 refresh 토큰이라는 문맥이기 때문이다 — access 토큰의 만료를
     # 눈감아 줄 이유는 없다.
     def decode_expired_refresh(token)
-      typed_claims(decode_payload(token, verify_expiration: false), expected_type: "refresh")
+      typed_claims(decode_payload(token), expected_type: "refresh")
     end
 
     def hash_refresh_token(token)
@@ -80,7 +83,7 @@ module Auth
       ActiveSupport::SecurityUtils.secure_compare(hash_refresh_token(token), stored_hash)
     end
 
-    def decode_payload(token, verify_expiration:)
+    def decode_payload(token)
       # ruby-jwt 3.2.0을 컨테이너에서 실측: token이 String이 아니면(Integer/Float/
       # Array/Hash/true/Symbol 등) `JWT::EncodedToken#initialize`가
       # `ArgumentError, "Provided JWT must be a String"`를 던진다 — 아래 rescue
@@ -100,7 +103,8 @@ module Auth
         iss: config.issuer, verify_iss: true,
         aud: config.audience, verify_aud: true,
         required_claims: REQUIRED_CLAIMS,
-        verify_expiration: verify_expiration,
+        verify_expiration: false,
+        verify_not_before: false,
         leeway: config.leeway_seconds
       }).first
     rescue JWT::ExpiredSignature
@@ -137,7 +141,7 @@ module Auth
       aud = payload["aud"]
 
       raise InvalidToken, "sub must be a non-empty string" unless sub.is_a?(String) && !sub.empty?
-      raise InvalidToken, "jti must be a UUID" unless raw_jti.is_a?(String) && JTI_PATTERN.match?(raw_jti)
+      raise InvalidToken, "jti must be a UUID" unless uuid_claim(raw_jti)
       raise InvalidToken, "unexpected token type" unless raw_type == expected_type
       # Ruby는 true/false가 Numeric의 인스턴스가 아니어서 is_a?(Numeric) 하나로
       # bool까지 함께 걸러진다. PyJWT는 bool이 int의 서브클래스라 정본이
@@ -155,8 +159,8 @@ module Auth
       # Time.at은 예외 없이 받아 준다 — "서기 3경 년" Time이 조용히 생겨 절대
       # 만료되지 않는 토큰이 된다)을 여기서 직접 막는다. finite?가 먼저 와야 한다
       # — Float::NAN.between?(a, b)는 false가 아니라 ArgumentError를 낸다.
-      raise InvalidToken, "iat out of range" unless raw_iat.finite? && raw_iat.between?(MIN_TIMESTAMP, MAX_TIMESTAMP)
-      raise InvalidToken, "exp out of range" unless raw_exp.finite? && raw_exp.between?(MIN_TIMESTAMP, MAX_TIMESTAMP)
+      raise InvalidToken, "iat out of range" unless raw_iat.finite? && raw_iat >= MIN_TIMESTAMP && raw_iat < 253_402_300_800
+      raise InvalidToken, "exp out of range" unless raw_exp.finite? && raw_exp >= MIN_TIMESTAMP && raw_exp < 253_402_300_800
       # ruby-jwt의 Claims::Audience#verify!는 `([*aud] & [*expected]).empty?`로
       # 판단한다(jwt/claims/audience.rb) — token의 aud가 배열이고 그중 하나만
       # 우리 audience와 같아도 통과시키는 "포함" 검사다. 컨테이너에서 직접 확인:
@@ -166,8 +170,16 @@ module Auth
       # 문자열인지 다시 본다.
       raise InvalidToken, "aud must match exactly" unless aud == config.audience
 
+      if payload.key?("nbf")
+        nbf = payload["nbf"]
+        raise InvalidToken unless nbf.is_a?(Numeric) && nbf.finite? && nbf >= MIN_TIMESTAMP && nbf < 253_402_300_800
+      end
+      now = Time.now.to_f
+      raise InvalidToken if raw_iat.to_i > now + config.leeway_seconds
+      raise InvalidToken if payload.key?("nbf") && payload["nbf"].to_i > now + config.leeway_seconds
+
       Claims.new(
-        sub: sub,
+        sub: uuid_claim(sub) || sub,
         # 정본은 UUID(raw_jti)로 파싱해 반환하고, 그 UUID를 문자열화하면 항상
         # 소문자다 — 대소문자 무관이 타입에서 공짜로 따라온다. Ruby에는 그런 타입이
         # 없고 raw_jti는 그냥 String이라, 여기서 downcase하지 않으면
@@ -176,13 +188,20 @@ module Auth
         # Ruby String으로 직접 비교하는 자리(세션 id 대조, 로그 상관관계)는 그렇지
         # 않다 — 여기서 한 번 정규화해 두면 그 이후의 모든 소비자가 매번 기억하지
         # 않아도 정본과 같은 보장을 받는다.
-        jti: raw_jti.downcase,
+        jti: uuid_claim(raw_jti),
         type: raw_type,
         iat: Time.at(raw_iat).utc,
         exp: Time.at(raw_exp).utc,
         iss: payload["iss"],
         aud: aud
       ).freeze
+    end
+
+    def uuid_claim(value)
+      return unless value.is_a?(String)
+      Jsonapi::ScalarGrammar.uuid(value)
+    rescue ArgumentError
+      nil
     end
 
     def config

@@ -47,9 +47,6 @@ module Jsonapi
 
     def call
       @raw_pairs = parse_raw_pairs
-      if (conflict = Jsonapi::RawQuery.shape_conflict(@raw_pairs))
-        invalid_query!(*conflict)
-      end
       @raw_pairs.each { |parameter, value| parse_parameter(parameter, value) }
       validate_action_controller_parameters!
       validate_cursor_mode!
@@ -122,7 +119,7 @@ module Jsonapi
     end
 
     def parse_raw_pairs
-      Jsonapi::RawQuery.decode(@request.query_string)
+      Jsonapi::RawQuery.decode(Jsonapi::RawQuery.string(@request))
     rescue ArgumentError
       invalid_query!("INVALID_QUERY_PARAMETER", @request.query_string)
     end
@@ -194,9 +191,7 @@ module Jsonapi
     end
 
     def parse_bounded_integer(raw_value, parameter, maximum)
-      invalid_query!("INVALID_FILTER", parameter) unless INTEGER.match?(raw_value)
-
-      value = Integer(raw_value, 10)
+      value = ScalarGrammar.integer(raw_value)
       return value if (-maximum - 1..maximum).cover?(value)
 
       invalid_query!("INVALID_FILTER", parameter)
@@ -205,15 +200,13 @@ module Jsonapi
     end
 
     def parse_uuid(raw_value, parameter)
-      return raw_value.downcase if UUID.match?(raw_value)
-
+      ScalarGrammar.uuid(raw_value)
+    rescue ArgumentError
       invalid_query!("INVALID_FILTER", parameter)
     end
 
     def parse_datetime(raw_value, parameter)
-      invalid_query!("INVALID_FILTER", parameter) unless DATETIME_WITH_OFFSET.match?(raw_value)
-
-      Time.iso8601(raw_value)
+      ScalarGrammar.timestamp(raw_value)
     rescue ArgumentError
       invalid_query!("INVALID_FILTER", parameter)
     end
@@ -297,7 +290,7 @@ module Jsonapi
     end
 
     def validate_page_offset!
-      return if (@page_number - 1) * @page_size <= Pagination::MAX_SQL_INTEGER
+      return if (@page_number - 1) * @page_size <= Pagination::MAX_SAFE_OFFSET
 
       invalid_query!("INVALID_PAGE", "page[number]")
     end
@@ -428,6 +421,7 @@ module Jsonapi
 
       unless @cursor_raw.empty?
         values = Cursor.decode(@cursor_raw, Cursor.signature(terms), cursor_parameter)
+        values = Cursor.typed_values(@model, terms, attributes, values, cursor_parameter)
         scope = scope.where(
           Cursor.keyset_predicate(@model.arel_table, terms, attributes, values, before: @cursor_before)
         )

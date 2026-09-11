@@ -246,7 +246,7 @@ RSpec.describe "Example authentication boundary", type: :request do
         )
 
         expect_auth_error(:not_acceptable, "NOT_ACCEPTABLE")
-        expect(parsed_body.dig("errors", 0, "source")).to eq("parameter" => "Accept")
+        expect(parsed_body.dig("errors", 0, "source")).to eq("header" => "Accept")
       end
     end
 
@@ -261,7 +261,7 @@ RSpec.describe "Example authentication boundary", type: :request do
           )
 
           expect_auth_error(:unsupported_media_type, "UNSUPPORTED_MEDIA_TYPE")
-          expect(parsed_body.dig("errors", 0, "source")).to eq("parameter" => "Content-Type")
+          expect(parsed_body.dig("errors", 0, "source")).to eq("header" => "Content-Type")
         end
       end
   end

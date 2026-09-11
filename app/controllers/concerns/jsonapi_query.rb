@@ -12,7 +12,6 @@ module JsonapiQuery
   extend ActiveSupport::Concern
 
   included do
-    before_action :raise_pending_jsonapi_query_shape_conflict
     before_action :validate_jsonapi_action_query!
   end
 
@@ -39,7 +38,9 @@ module JsonapiQuery
     conflict, sanitized_pairs = Jsonapi::RawQuery.sanitize_shape_conflicts(Jsonapi::RawQuery.decode(request.query_string))
     return unless conflict
 
-    @pending_jsonapi_query_shape_conflict = conflict
+    # Rack cannot represent a scalar and an operator map at the same path. Keep
+    # the original API pairs while supplying Rack a shape it can safely parse.
+    request.set_header("jsonapi.raw_query_string", request.query_string)
     request.set_header("QUERY_STRING", URI.encode_www_form(sanitized_pairs))
     request.delete_header("action_dispatch.request.query_parameters")
     request.delete_header("action_dispatch.request.parameters")
@@ -49,19 +50,11 @@ module JsonapiQuery
     nil
   end
 
-  def raise_pending_jsonapi_query_shape_conflict
-    return unless action_name == "index" && respond_to?(:query_contract, true)
-    return unless @pending_jsonapi_query_shape_conflict
-
-    code, parameter = @pending_jsonapi_query_shape_conflict
-    raise JsonApiError.new(status: 400, code: code, source: { parameter: parameter })
-  end
-
   def validate_jsonapi_action_query!
     return unless respond_to?(:jsonapi_query_mode, true)
 
     mode = jsonapi_query_mode
-    pairs = Jsonapi::RawQuery.decode(request.query_string)
+    pairs = Jsonapi::RawQuery.decode(Jsonapi::RawQuery.string(request))
 
     # related_collection은 pairs가 비어도(기본 페이지) 돌려야 한다 — render_related_resource가
     # 쓸 page[number]/page[size] 기본값을 ivar에 남겨야 하기 때문이다. 다른 모드는
@@ -136,7 +129,7 @@ module JsonapiQuery
       end
     end
 
-    if (page_number - 1) * page_size > Jsonapi::Pagination::MAX_SQL_INTEGER
+    if (page_number - 1) * page_size > Jsonapi::Pagination::MAX_SAFE_OFFSET
       raise JsonApiError.new(status: 400, code: "INVALID_PAGE", source: { parameter: "page[number]" })
     end
 

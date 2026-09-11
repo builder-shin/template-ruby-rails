@@ -76,25 +76,57 @@ RSpec.describe "Example atomic PUT upsert", type: :request do
     expect(example.tags).to be_empty
   end
 
-  it "uses model defaults for omitted replaceable status and score" do
+  it "requires status and score instead of applying model defaults on PUT" do
     example = create(:example, title: "Before", status: "archived", score: 91)
+    [
+      [ { title: "Missing status", score: 0 }, "/data/attributes/status" ],
+      [ { title: "Missing score", status: "draft" }, "/data/attributes/score" ]
+    ].each do |attributes, pointer|
+      body = { data: { type: "examples", id: example.id, attributes: attributes } }
+      perform_put(example.id, body)
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(parsed_body.dig("errors", 0)).to include(
+        "code" => "VALIDATION_ERROR", "source" => { "pointer" => pointer }
+      )
+    end
+    expect(example.reload.attributes.slice("title", "description", "status", "score")).to eq(
+      "title" => "Before", "description" => nil, "status" => "archived", "score" => 91
+    )
+  end
+
+  it "reports every missing required replacement attribute" do
+    example = create(:example, title: "Before", status: "active", score: 50)
+    body = { data: { type: "examples", id: example.id, attributes: { title: "Incomplete" } } }
+
+    perform_put(example.id, body)
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(parsed_body.fetch("errors").pluck("source")).to eq(
+      [
+        { "pointer" => "/data/attributes/status" },
+        { "pointer" => "/data/attributes/score" }
+      ]
+    )
+  end
+
+  it "reports a missing replacement document id as a validation error" do
+    example = create(:example, title: "Before", status: "active", score: 50)
     body = {
       data: {
         type: "examples",
-        id: example.id,
-        attributes: { title: "Defaulted" }
+        attributes: { title: "After", status: "draft", score: 10 }
       }
     }
 
     perform_put(example.id, body)
 
-    expect(response).to have_http_status(:ok)
-    expect(example.reload.attributes.slice("title", "description", "status", "score")).to eq(
-      "title" => "Defaulted",
-      "description" => nil,
-      "status" => "draft",
-      "score" => 0
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(parsed_body.fetch("errors").first).to include(
+      "code" => "VALIDATION_ERROR",
+      "source" => { "pointer" => "/data/id" }
     )
+    expect(example.reload).to have_attributes(title: "Before", status: "active", score: 50)
   end
 
   it "canonicalizes uppercase UUIDs in Location and self" do
